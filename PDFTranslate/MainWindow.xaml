@@ -1,12 +1,71 @@
-﻿<Window x:Class="PDFTranslate.MainWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+﻿<Window x:Class="PDFTranslate.MainWindow" 
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:PDFTranslate"
-        mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
-    <Grid>
-        
+
+    mc:Ignorable="d"
+        Title="PDFTranslater" Height="450" Width="600">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <!-- 按钮行 -->
+            <RowDefinition Height="*"/>
+            <!-- ListView 行 -->
+        </Grid.RowDefinitions>
+
+        <!-- 添加文件按钮 -->
+        <Button x:Name="btnAddFile" Content="添加文件..."
+                Grid.Row="0" HorizontalAlignment="Left"
+                Padding="10,5" Margin="0,0,0,10"
+                Click="AddFile_Click"/>
+
+        <!-- 文件列表视图 -->
+        <ListView x:Name="fileListView" Grid.Row="1"
+                  ItemsSource="{Binding FileItems}"
+                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListView.View>
+                <GridView>
+                    <!-- 列1: 文件名 -->
+                    <GridViewColumn Header="文件名">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding FileName}"
+                                           VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTip="{Binding FileName}" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+
+                    <!-- 列2: 操作按钮 -->
+                    <GridViewColumn Header="操作" Width="160">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Button Content="打开" Margin="0,0,5,0" Padding="5,2"
+                                            Click="OpenButton_Click"
+                                            Tag="{Binding FullPath}"/>
+                                    <Button Content="翻译" Padding="5,2"
+                                            Click="TranslateButton_Click"
+                                            Tag="{Binding FullPath}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                </GridView>
+            </ListView.View>
+
+            <!-- 设置 ListViewItem 样式 -->
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    <Setter Property="Margin" Value="0,1"/>
+                    <Setter Property="Padding" Value="5,3"/>
+                </Style>
+            </ListView.ItemContainerStyle>
+
+        </ListView>
     </Grid>
 </Window>
