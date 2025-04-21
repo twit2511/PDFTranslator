@@ -16,7 +16,7 @@ namespace PDFTranslate.translators
         //这里别动
         private const string HardcodedSecretId = "";//"AKIDxX0FG4f3D9sQl4PeS9i5IOJ60oUzISo4";
         private const string HardcodedSecretKey = "";//"pW2b4KOVUJBuUt6DLK6g5IH3f4FE0bz9";
-        private const string HardcodedRegion = "ap-guangzhou";
+        private const string HardcodedRegion = "";//"ap-guangzhou";
         // --- 硬编码结束 ---
 
         public string Name => "腾讯云翻译 (硬编码凭据 - 不安全)";
