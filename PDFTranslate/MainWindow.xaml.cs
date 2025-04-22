@@ -14,17 +14,16 @@ namespace PDFTranslate // 修改这里
     /// </summary>
     public partial class MainWindow : Window
     {
-        public ObservableCollection<FileInfoItem> FileItems { get; set; }
+        public ObservableCollection<FileInfoItem> FileList { get; set; }
 
         public MainWindow()
         {
             InitializeComponent();
-            FileItems = new ObservableCollection<FileInfoItem>();
-            // 如果 FileInfoItem 类定义在 MainWindow.xaml.cs 内部，则不需要单独修改它的 namespace
+            FileList = new ObservableCollection<FileInfoItem>();
             this.DataContext = this;
         }
 
-        private void AddFile_Click(object sender, RoutedEventArgs e)
+        private void AddFileButton_Click(object sender, RoutedEventArgs e)
         {
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.Filter = "PDF Files (*.pdf)|*.pdf|All files (*.*)|*.*";
@@ -34,20 +33,25 @@ namespace PDFTranslate // 修改这里
             {
                 string filePath = openFileDialog.FileName;
 
-                if (!FileItems.Any(item => item.FullPath.Equals(filePath, StringComparison.OrdinalIgnoreCase)))
+                if (!FileList.Any(item => item.FullPath.Equals(filePath, StringComparison.OrdinalIgnoreCase)))
                 {
                     FileInfoItem newItem = new FileInfoItem // 确保 FileInfoItem 可访问
                     {
                         FileName = Path.GetFileName(filePath),
                         FullPath = filePath
                     };
-                    FileItems.Add(newItem);
+                    FileList.Add(newItem);
                 }
                 else
                 {
                     MessageBox.Show($"文件 '{Path.GetFileName(filePath)}' 已存在于列表中。", "重复添加", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
             }
+        }
+
+        private void ExitButton_Click(object sender, RoutedEventArgs e)
+        {
+            Application.Current.Shutdown();
         }
 
         private void OpenButton_Click(object sender, RoutedEventArgs e)
@@ -75,6 +79,23 @@ namespace PDFTranslate // 修改这里
             }
         }
 
+        private void RemoveButton_Click(object sender, RoutedEventArgs e)
+        {
+            Button clickedButton = sender as Button;
+            if (clickedButton != null)
+            {
+                string filePath = clickedButton.Tag as string;
+                if (!string.IsNullOrEmpty(filePath))
+                {
+                    FileInfoItem itemToRemove = FileList.FirstOrDefault(item => item.FullPath.Equals(filePath, StringComparison.OrdinalIgnoreCase));
+                    if (itemToRemove != null)
+                    {
+                        FileList.Remove(itemToRemove);
+                    }
+                }
+            }
+        }
+
         private void TranslateButton_Click(object sender, RoutedEventArgs e)
         {
             Button clickedButton = sender as Button;
@@ -98,10 +119,5 @@ namespace PDFTranslate // 修改这里
             }
         }
 
-        // 如果 FileInfoItem 类定义在这里，它会自动使用 PDFTranslate 命名空间
-        // public class FileInfoItem { ... }
     }
-
-    // 如果 FileInfoItem 类定义在 MainWindow.xaml.cs 外部但在同一个文件中（不推荐）
-    // public class FileInfoItem { ... }
 }

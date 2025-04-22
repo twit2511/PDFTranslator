@@ -6,7 +6,7 @@
         xmlns:local="clr-namespace:PDFTranslate"
 
     mc:Ignorable="d"
-        Title="PDFTranslater" Height="450" Width="600">
+        Title="PDFTranslator" Height="450" Width="600">
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -16,19 +16,25 @@
         </Grid.RowDefinitions>
 
         <!-- 添加文件按钮 -->
-        <Button x:Name="btnAddFile" Content="添加文件..."
+        <Button x:Name="btnAddFile" Content="添加文件" ToolTip="请选择你需要添加的文件"
                 Grid.Row="0" HorizontalAlignment="Left"
                 Padding="10,5" Margin="0,0,0,10"
-                Click="AddFile_Click"/>
+                Click="AddFileButton_Click"/>
+
+        <!--推出程序按钮-->
+        <Button x:Name="btnExit" Content="退出程序" ToolTip="退出程序"
+                Grid.Row="0" HorizontalAlignment="Right"
+                Padding="10,5" Margin="0,0,0,10"
+                Click="ExitButton_Click"/>
 
         <!-- 文件列表视图 -->
-        <ListView x:Name="fileListView" Grid.Row="1"
-                  ItemsSource="{Binding FileItems}"
-                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+        <ListView x:Name="fileListView"
+                  ItemsSource="{Binding FileList}"
+                  ScrollViewer.HorizontalScrollBarVisibility="Disabled" Margin="0,37,0,0" Grid.RowSpan="2">
             <ListView.View>
                 <GridView>
                     <!-- 列1: 文件名 -->
-                    <GridViewColumn Header="文件名">
+                    <GridViewColumn Header="文件名" Width="350">
                         <GridViewColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding FileName}"
@@ -40,12 +46,15 @@
                     </GridViewColumn>
 
                     <!-- 列2: 操作按钮 -->
-                    <GridViewColumn Header="操作" Width="160">
+                    <GridViewColumn Header="操作" Width="200">
                         <GridViewColumn.CellTemplate>
                             <DataTemplate>
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                    <Button Content="打开" Margin="0,0,5,0" Padding="5,2"
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"> 
+                                    <Button Content="打开" Padding="5,2"
                                             Click="OpenButton_Click"
+                                            Tag="{Binding FullPath}"/>
+                                    <Button Content="移除" Margin="25,0,25,0" Padding="5,2"
+                                            Click="RemoveButton_Click"
                                             Tag="{Binding FullPath}"/>
                                     <Button Content="翻译" Padding="5,2"
                                             Click="TranslateButton_Click"
