@@ -39,6 +39,9 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
+      <HintPath>..\packages\Newtonsoft.Json.13.0.2\lib\net45\Newtonsoft.Json.dll</HintPath>
+    </Reference>
     <Reference Include="PdfiumViewer, Version=1.1.1.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\PDFium.Viewer.WPF.1.1.1\lib\net461\PdfiumViewer.dll</HintPath>
     </Reference>
@@ -46,6 +49,9 @@
     <Reference Include="System.Data" />
     <Reference Include="System.Drawing.Common, Version=9.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>..\packages\System.Drawing.Common.9.0.4\lib\net462\System.Drawing.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Text.Encodings.Web, Version=4.0.3.1, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>..\packages\System.Text.Encodings.Web.4.5.1\lib\netstandard2.0\System.Text.Encodings.Web.dll</HintPath>
     </Reference>
     <Reference Include="System.Xml" />
     <Reference Include="Microsoft.CSharp" />
@@ -55,6 +61,12 @@
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Xaml">
       <RequiredTargetFramework>4.0</RequiredTargetFramework>
+    </Reference>
+    <Reference Include="TencentCloudCommon, Version=3.0.1223.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\TencentCloudSDK.Common.3.0.1223\lib\net45\TencentCloudCommon.dll</HintPath>
+    </Reference>
+    <Reference Include="TencentCloudTmt, Version=3.0.1223.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\TencentCloudSDK.Tmt.3.0.1223\lib\net45\TencentCloudTmt.dll</HintPath>
     </Reference>
     <Reference Include="WindowsBase" />
     <Reference Include="PresentationCore" />
@@ -66,6 +78,8 @@
       <SubType>Designer</SubType>
     </ApplicationDefinition>
     <Compile Include="FileInfoItem.cs" />
+    <Compile Include="Translate\ITranslator.cs" />
+    <Compile Include="Translate\Translator.cs" />
     <Compile Include="Windows\PostTransWindow.xaml.cs">
       <DependentUpon>PostTransWindow.xaml</DependentUpon>
     </Compile>
