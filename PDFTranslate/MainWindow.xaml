@@ -21,7 +21,7 @@
                 Padding="10,5" Margin="0,0,0,10"
                 Click="AddFileButton_Click"/>
 
-        <!--推出程序按钮-->
+        <!--退出程序按钮-->
         <Button x:Name="btnExit" Content="退出程序" ToolTip="退出程序"
                 Grid.Row="0" HorizontalAlignment="Right"
                 Padding="10,5" Margin="0,0,0,10"
@@ -49,7 +49,7 @@
                     <GridViewColumn Header="操作" Width="200">
                         <GridViewColumn.CellTemplate>
                             <DataTemplate>
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"> 
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                                     <Button Content="打开" Padding="5,2"
                                             Click="OpenButton_Click"
                                             Tag="{Binding FullPath}"/>
@@ -76,5 +76,6 @@
             </ListView.ItemContainerStyle>
 
         </ListView>
+
     </Grid>
 </Window>
