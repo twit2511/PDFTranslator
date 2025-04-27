@@ -14,9 +14,9 @@ namespace PDFTranslate.translators
     public class Translator : ITranslator
     {
         //这里别动
-        private const string HardcodedSecretId = "";//"AKIDxX0FG4f3D9sQl4PeS9i5IOJ60oUzISo4";
-        private const string HardcodedSecretKey = "";//"pW2b4KOVUJBuUt6DLK6g5IH3f4FE0bz9";
-        private const string HardcodedRegion = "";//"ap-guangzhou";
+        private const string HardcodedSecretId = "AKIDxX0FG4f3D9sQl4PeS9i5IOJ60oUzISo4";
+        private const string HardcodedSecretKey = "pW2b4KOVUJBuUt6DLK6g5IH3f4FE0bz9";
+        private const string HardcodedRegion = "ap-guangzhou";
         // --- 硬编码结束 ---
 
         public string Name => "腾讯云翻译 (硬编码凭据 - 不安全)";
@@ -44,7 +44,7 @@ namespace PDFTranslate.translators
         /// <returns></returns>
         /// <exception cref="ArgumentException"></exception>
         /// <exception cref="Exception"></exception>
-        public async Task<string> TranslateAsync(string textToTranslate, string sourceLanguage, string targetLanguage)
+        public string TranslateAsync(string textToTranslate, string sourceLanguage, string targetLanguage)
         {
             if (string.IsNullOrWhiteSpace(textToTranslate)) return string.Empty;
             if (string.IsNullOrWhiteSpace(sourceLanguage) || string.IsNullOrWhiteSpace(targetLanguage))
@@ -74,7 +74,7 @@ namespace PDFTranslate.translators
                     ProjectId = 0
                 };
 
-                TextTranslateResponse resp = await client.TextTranslate(req);
+                TextTranslateResponse resp = client.TextTranslate(req).Result;
                 return resp.TargetText ?? string.Empty;
             }
             catch (TencentCloudSDKException e) // 捕获腾讯云特定的异常
