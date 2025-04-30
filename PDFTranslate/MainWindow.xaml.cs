@@ -7,7 +7,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 
-namespace PDFTranslate // 修改这里
+namespace PDFTranslate 
 {
     /// <summary>
     /// MainWindow.xaml 的交互逻辑
@@ -106,11 +106,7 @@ namespace PDFTranslate // 修改这里
                 {
                     // --- 调用翻译逻辑 ---
                     MessageBox.Show($"已触发翻译操作，文件路径:\n{filePath}", "翻译占位符", MessageBoxButton.OK, MessageBoxImage.Information);
-                    // 这里你需要添加实际打开翻译窗口或执行翻译的代码
-                    // 例如:
-                    // TranslateWindow translateWin = new TranslateWindow(filePath); // 假设你有翻译窗口
-                    // translateWin.Owner = this;
-                    // translateWin.Show(); // 或者 ShowDialog()
+                    
                 }
                 else
                 {
