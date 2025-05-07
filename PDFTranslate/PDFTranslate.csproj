@@ -159,6 +159,7 @@
     <Compile Include="FileInfoItem.cs" />
     <Compile Include="PDFProcessor\AdvancedPdfExtractor.cs" />
     <Compile Include="PDFProcessor\IPdfElement.cs" />
+    <Compile Include="PDFProcessor\PDFBuilder\Rebuilder.cs" />
     <Compile Include="PDFProcessor\PDFElementExtractionListener.cs" />
     <Compile Include="PDFProcessor\PDFElements\ImageElement.cs" />
     <Compile Include="PDFProcessor\PDFElements\IPDFElement.cs" />
