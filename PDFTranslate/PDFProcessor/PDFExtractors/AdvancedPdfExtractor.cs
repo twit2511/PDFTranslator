@@ -6,7 +6,7 @@ using PDFTranslate.PDFProcessor.PDFElements;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas.Parser;
 
-namespace PDFTranslate.PDFProcessor
+namespace PDFTranslate.PDFProcessor.PDFExtractors
 {
     /// <summary>
     /// 封装了PDF提取和分析的主要流程。
@@ -82,6 +82,7 @@ namespace PDFTranslate.PDFProcessor
             }
 
             Console.WriteLine($"\n提取与分析完成。共处理 {allElements.Count} 个元素。");
+
 
 
 

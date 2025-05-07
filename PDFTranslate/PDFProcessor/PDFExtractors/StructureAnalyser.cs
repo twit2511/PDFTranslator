@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System;
 using PDFTranslate.PDFProcessor.PDFElements;
 
-namespace PDFTranslate.PDFProcessor
+namespace PDFTranslate.PDFProcessor.PDFExtractors
 {
     /// <summary>
     /// 包含用于分析页面结构（目前主要是表格）的静态方法。
@@ -160,5 +160,5 @@ namespace PDFTranslate.PDFProcessor
             return new Point(rect.GetX() + rect.GetWidth() / 2.0, rect.GetY() + rect.GetHeight() / 2.0);
         }
     }
-
+    
 }

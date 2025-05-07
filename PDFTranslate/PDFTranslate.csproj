@@ -157,14 +157,12 @@
       <SubType>Designer</SubType>
     </ApplicationDefinition>
     <Compile Include="FileInfoItem.cs" />
-    <Compile Include="PDFProcessor\AdvancedPdfExtractor.cs" />
-    <Compile Include="PDFProcessor\IPdfElement.cs" />
-    <Compile Include="PDFProcessor\PDFBuilder\Rebuilder.cs" />
-    <Compile Include="PDFProcessor\PDFElementExtractionListener.cs" />
+    <Compile Include="PDFProcessor\PDFExtractors\AdvancedPdfExtractor.cs" />
+    <Compile Include="PDFProcessor\PDFExtractors\PDFElementExtractionListener.cs" />
     <Compile Include="PDFProcessor\PDFElements\ImageElement.cs" />
     <Compile Include="PDFProcessor\PDFElements\IPDFElement.cs" />
     <Compile Include="PDFProcessor\PDFElements\LineElement.cs" />
-    <Compile Include="PDFProcessor\StructureAnalyser.cs" />
+    <Compile Include="PDFProcessor\PDFExtractors\StructureAnalyser.cs" />
     <Compile Include="PDFProcessor\PDFElements\TextElement.cs" />
     <Compile Include="Translate\ITranslator.cs" />
     <Compile Include="Translate\Translator.cs" />
