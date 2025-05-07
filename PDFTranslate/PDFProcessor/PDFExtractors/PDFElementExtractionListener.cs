@@ -11,7 +11,7 @@ using System.Text;
 using System.Threading.Tasks;
 using iText.Kernel.Geom;
 
-namespace PDFTranslate.PDFProcessor
+namespace PDFTranslate.PDFProcessor.PDFExtractors
 {
     /// <summary>
     /// 实现 iText 7 事件监听器，用于提取页面元素。
@@ -140,7 +140,7 @@ namespace PDFTranslate.PDFProcessor
             PdfImageXObject imageObject = renderInfo.GetImage();
             if (imageObject == null)
             {
-                // Console.WriteLine($"警告: 在第 {_pageNumber} 页检测到图像事件，但无法获取图像对象。");
+                Console.WriteLine($"警告: 在第 {_pageNumber} 页检测到图像事件，但无法获取图像对象。");
                 return;
             }
             Matrix matrix = renderInfo.GetImageCtm(); // 获取变换矩阵，保证位置正确
