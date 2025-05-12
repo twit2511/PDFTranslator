@@ -160,6 +160,7 @@
       <SubType>Designer</SubType>
     </ApplicationDefinition>
     <Compile Include="FileInfoItem.cs" />
+    <Compile Include="PDFProcessor\PDFBuilder\Rebuilder.cs" />
     <Compile Include="PDFProcessor\PDFExtractors\AdvancedPdfExtractor.cs" />
     <Compile Include="PDFProcessor\PDFExtractors\PDFElementExtractionListener.cs" />
     <Compile Include="PDFProcessor\PDFElements\ImageElement.cs" />
