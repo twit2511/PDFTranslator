@@ -7,7 +7,7 @@ using PDFTranslate.PDFProcessor.PDFElements;
 namespace PDFTranslate.PDFProcessor.PDFExtractors
 {
     /// <summary>
-    /// 包含用于分析页面结构（目前主要是表格）的静态方法。
+    /// 包含用于分析页面结构的静态方法。
     /// </summary>
     public static class StructureAnalyzer
     {
@@ -28,11 +28,11 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
             if (pageElements == null || !pageElements.Any()) return pageElements;
 
             // 1. 按类型分离元素
-            var textElements = pageElements.Cast<TextElement>()
+            var textElements = pageElements.OfType<TextElement>()
                                            .OrderBy(t => t.ApproximateBoundingBox.GetY()) // 按 Y 排序 (方便调试和某些分析)
                                            .ThenBy(t => t.ApproximateBoundingBox.GetX()) // 再按 X 排序
                                            .ToList();
-            var lineElements = pageElements.Cast<LineElement>().ToList();
+            var lineElements = pageElements.OfType<LineElement>().ToList();
 
             // 2. 表格检测（基于线条）
             var horizontalLines = lineElements.Where(l => l.IsHorizontal(LINE_DETECTION_TOLERANCE)).ToList();
@@ -87,7 +87,7 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
             // c. 将文本元素分配到其所属的单元格
             foreach (var textElement in textElements)
             {
-                // 跳过已经确定是公式的文本，它们不可能是表格内容
+                // 跳过已经确定是公式的文本
                 if (textElement.ElementType == PDFElementType.Formula) continue;
 
                 // 使用文本块的中心点来判断归属
@@ -102,8 +102,9 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
                         textCenter.GetY() > cellRect.GetBottom() + TABLE_CELL_PADDING &&
                         textCenter.GetY() < cellRect.GetTop() - TABLE_CELL_PADDING)
                     {
-                        
-                        break;
+                        // --- 归属成功，更新文本元素的表格信息和类型 ---
+                        textElement.ElementType = PDFElementType.TableCell; // *** 更新 Type ***
+                        break; // 找到了单元格，不需要再检查其他单元格
                     }
                 }
             }

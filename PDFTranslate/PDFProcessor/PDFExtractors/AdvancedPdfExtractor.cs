@@ -56,7 +56,7 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
                     // 对当前页的元素进行结构分析（表格检测）
                     // Console.WriteLine($"    开始对第 {i} 页进行结构分析..."); // 调试信息
                     var processedPageElements = StructureAnalyzer.AnalyzePageStructure(rawPageElements);
-                    allElements.AddRange((IEnumerable<IPDFElement>)processedPageElements); // 将处理后的元素添加到总列表
+                    allElements.AddRange(processedPageElements); // 将处理后的元素添加到总列表
                 }
             }
             catch (iText.Kernel.Exceptions.PdfException pdfEx) // 捕获 iText 特定异常

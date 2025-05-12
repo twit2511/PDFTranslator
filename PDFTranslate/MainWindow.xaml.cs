@@ -1,4 +1,5 @@
 ﻿using Microsoft.Win32;
+using PDFTranslate.PDFProcessor.PDFExtractors;
 using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -105,7 +106,9 @@ namespace PDFTranslate
                 if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
                 {
                     // --- 调用翻译逻辑 ---
-                    MessageBox.Show($"已触发翻译操作，文件路径:\n{filePath}", "翻译占位符", MessageBoxButton.OK, MessageBoxImage.Information);
+                    //MessageBox.Show($"已触发翻译操作，文件路径:\n{filePath}", "翻译占位符", MessageBoxButton.OK, MessageBoxImage.Information);
+                    Console.WriteLine("ProcessStart");
+                    AdvancedPdfProcessor.ProcessPdf(filePath, (processedElements) => { });
                     
                 }
                 else
