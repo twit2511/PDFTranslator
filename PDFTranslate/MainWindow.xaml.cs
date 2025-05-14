@@ -106,7 +106,7 @@ namespace PDFTranslate
                 string filePath = clickedButton.Tag as string;
                 if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
                 {
-                    string outPutPath = @"E:\test\MyNewPdf.pdf";
+                    string outPutPath = @"D:\MyNewPdf.pdf";
                     // --- 调用翻译逻辑 ---
                     //MessageBox.Show($"已触发翻译操作，文件路径:\n{filePath}", "翻译占位符", MessageBoxButton.OK, MessageBoxImage.Information);
                     Console.WriteLine("RebuildStart");
