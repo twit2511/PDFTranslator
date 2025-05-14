@@ -18,9 +18,57 @@ using System.Windows.Media;
 
 namespace PDFTranslate.PDFProcessor.PDFBuilder
 {
-    public static class Rebulider
+    public static class Rebuilder
     {
+        private static Dictionary<string, PdfFont> _fontCache = new Dictionary<string, PdfFont>();
+        private static PdfFont _globalFallbackFont; // 使用我们下载的字体作为主要的备用字体
+        private const string CustomFontsDirectory = "Fonts"; // 假设字体放在项目输出目录下的 "Fonts" 文件夹
 
+        static Rebuilder()
+        {
+            try
+            {
+                
+                // ---- 使用下载的字体作为全局备用字体 ----
+                string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+                // 例如，你下载了一个名为 "NotoSansCJKsc-Regular.otf" 的字体来支持中文
+                string fallbackFontFileName = "Roboto_Condensed - Black.ttf"; // 修改为你下载的字体文件名
+                // 或者，如果你用的是 Arial Unicode MS
+                // string fallbackFontFileName = "arialuni.ttf";
+
+                string fallbackFontPath = System.IO.Path.Combine(baseDirectory, CustomFontsDirectory, fallbackFontFileName);
+
+                if (File.Exists(fallbackFontPath))
+                {
+                    _globalFallbackFont = PdfFontFactory.CreateFont(fallbackFontPath, PdfEncodings.IDENTITY_H, PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                    Console.WriteLine($"全局备用字体 '{fallbackFontFileName}' 加载成功。");
+                }
+                else
+                {
+                    Console.WriteLine($"警告: 未找到全局备用字体文件 '{fallbackFontPath}'。将尝试使用 Helvetica。");
+                    LoadHelveticaAsFallback();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"警告: 加载全局备用字体时出错: {ex.Message}。将尝试使用 Helvetica。");
+                LoadHelveticaAsFallback();
+            }
+        }
+
+        private static void LoadHelveticaAsFallback()
+        {
+            try
+            {
+                _globalFallbackFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA, PdfEncodings.WINANSI, PdfFontFactory.EmbeddingStrategy.PREFER_NOT_EMBEDDED);
+                Console.WriteLine("已加载 Helvetica 作为最终备用字体。");
+            }
+            catch (Exception helvEx)
+            {
+                Console.WriteLine($"严重错误: 无法加载 Helvetica作为备用字体: {helvEx.Message}");
+                // _globalFallbackFont 将为 null，GetFont 方法需要处理这种情况
+            }
+        }
 
         /// <summary>
         /// 获取用于绘制文本的字体。
@@ -33,12 +81,30 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
             {
                 return textElement.OriginalFont;
             }
-            else
+
+            if (_globalFallbackFont != null && CanFontDisplay(_globalFallbackFont, textToDraw))
             {
-                Console.WriteLine("字体获取出错");
-                return null;
+                return _globalFallbackFont;
+            }
+
+           
+            if (_fontCache.TryGetValue("HELVETICA_FINAL", out var helvetica))
+            {
+                if (CanFontDisplay(helvetica, textToDraw)) return helvetica;
+            }
+            try
+            {
+                var finalHelvetica = PdfFontFactory.CreateFont(StandardFonts.HELVETICA, PdfEncodings.WINANSI, PdfFontFactory.EmbeddingStrategy.PREFER_NOT_EMBEDDED);
+                _fontCache["HELVETICA_FINAL"] = finalHelvetica;
+                // 对于Helvetica，CanFontDisplay 对于非WinAnsi字符会返回false，这是正常的
+                return finalHelvetica;
+            }
+            catch (IOException ex)
+            {
+                throw new Exception("无法加载任何可用字体 (包括Helvetica) 来显示文本。", ex);
             }
         }
+
 
         private static bool CanFontDisplay(PdfFont font, string text)
         {
