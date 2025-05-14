@@ -18,23 +18,21 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
         /// </summary>
         /// <param name="sourcePdfPath">源PDF文件路径。</param>
         /// <param name="handleProcessedElements">处理完所有页面后，用于接收最终元素列表的回调函数。</param>
-        public static void ProcessPdf(string sourcePdfPath, Action<List<IPDFElement>> handleProcessedElements)
+        public static List<IPDFElement> ProcessPdf(string sourcePdfPath)
         {
             if (!File.Exists(sourcePdfPath))
             {
                 Console.WriteLine($"错误：文件未找到 {sourcePdfPath}");
-                handleProcessedElements?.Invoke(new List<IPDFElement>()); // 调用回调并传递空列表
-                return;
+                return null;
             }
 
             var allElements = new List<IPDFElement>();
-            PdfReader reader = null;
             PdfDocument pdfDoc = null;
 
             Console.WriteLine($"开始处理PDF文件: {sourcePdfPath}");
             try
             {
-                reader = new PdfReader(sourcePdfPath);
+                PdfReader reader = new PdfReader(sourcePdfPath);
                 // 对于有密码的PDF，需要提供密码: reader = new PdfReader(sourcePdfPath, new ReaderProperties().SetPassword(System.Text.Encoding.Default.GetBytes("your_password")));
                 pdfDoc = new PdfDocument(reader);
                 int numberOfPages = pdfDoc.GetNumberOfPages();
@@ -83,7 +81,7 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
 
             Console.WriteLine($"\n提取与分析完成。共处理 {allElements.Count} 个元素。");
 
-
+            return allElements;
 
 
         }

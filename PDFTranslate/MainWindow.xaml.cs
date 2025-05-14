@@ -1,5 +1,6 @@
 ﻿using Microsoft.Win32;
 using PDFTranslate.PDFProcessor.PDFExtractors;
+using PDFTranslate.PDFProcessor.PDFBuilder;
 using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -7,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using iText.Kernel.Pdf;
 
 namespace PDFTranslate 
 {
@@ -26,9 +28,11 @@ namespace PDFTranslate
 
         private void AddFileButton_Click(object sender, RoutedEventArgs e)
         {
-            OpenFileDialog openFileDialog = new OpenFileDialog();
-            openFileDialog.Filter = "PDF Files (*.pdf)|*.pdf|All files (*.*)|*.*";
-            openFileDialog.Title = "选择要添加的文件";
+            OpenFileDialog openFileDialog = new OpenFileDialog
+            {
+                Filter = "PDF Files (*.pdf)|*.pdf|All files (*.*)|*.*",
+                Title = "选择要添加的文件"
+            };
 
             if (openFileDialog.ShowDialog() == true)
             {
@@ -57,8 +61,7 @@ namespace PDFTranslate
 
         private void OpenButton_Click(object sender, RoutedEventArgs e)
         {
-            Button clickedButton = sender as Button;
-            if (clickedButton != null)
+            if (sender is Button clickedButton)
             {
                 string filePath = clickedButton.Tag as string;
                 if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
@@ -82,8 +85,7 @@ namespace PDFTranslate
 
         private void RemoveButton_Click(object sender, RoutedEventArgs e)
         {
-            Button clickedButton = sender as Button;
-            if (clickedButton != null)
+            if (sender is Button clickedButton)
             {
                 string filePath = clickedButton.Tag as string;
                 if (!string.IsNullOrEmpty(filePath))
@@ -99,17 +101,17 @@ namespace PDFTranslate
 
         private void TranslateButton_Click(object sender, RoutedEventArgs e)
         {
-            Button clickedButton = sender as Button;
-            if (clickedButton != null)
+            if (sender is Button clickedButton)
             {
                 string filePath = clickedButton.Tag as string;
                 if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
                 {
+                    string outPutPath = @"E:\test\MyNewPdf.pdf";
                     // --- 调用翻译逻辑 ---
                     //MessageBox.Show($"已触发翻译操作，文件路径:\n{filePath}", "翻译占位符", MessageBoxButton.OK, MessageBoxImage.Information);
-                    Console.WriteLine("ProcessStart");
-                    AdvancedPdfProcessor.ProcessPdf(filePath, (processedElements) => { });
-                    
+                    Console.WriteLine("RebuildStart");
+                    Rebulider.RebuildPdf(AdvancedPdfProcessor.ProcessPdf(filePath), outPutPath, filePath);
+
                 }
                 else
                 {

@@ -99,7 +99,7 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
                     int pageNum = pageGroup.Key;
                     Console.WriteLine($"  重建第 {pageNum} 页...");
                     var originalPage = sourceDoc.GetPage(pageNum);
-                    if (originalPage != null) {
+                    if (originalPage == null) {
                         Console.WriteLine($"    警告: 无法从源PDF获取第 {pageNum} 页。跳过此页。");
                         continue;
                     }
