@@ -15,6 +15,7 @@ using PDFTranslate.PDFProcessor.PDFElements;
 using System.Windows;
 using iText.Layout.Renderer;
 using System.Windows.Media;
+using iText.Kernel.Pdf.Xobject;
 
 namespace PDFTranslate.PDFProcessor.PDFBuilder
 {
@@ -74,13 +75,9 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
         /// 获取用于绘制文本的字体。
         /// 优先使用 TextElement.OriginalPdfFont，其次尝试从自定义字体目录加载，最后使用全局备用字体。
         /// </summary>
-        private static PdfFont GetFont(TextElement textElement, string textToDraw)
+        private static PdfFont GetFont(string textToDraw)
         {
-            // 1. 优先使用 TextElement 中直接携带的原始 PdfFont 对象 (如果存在且有效)
-            if (textElement.OriginalFont != null && CanFontDisplay(textElement.OriginalFont, textToDraw))
-            {
-                return textElement.OriginalFont;
-            }
+            
 
             if (_globalFallbackFont != null && CanFontDisplay(_globalFallbackFont, textToDraw))
             {
@@ -133,30 +130,29 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
         /// </summary>
         /// <param name="elements"> pdf的所有相关元素 </param>
         /// <param name="outputPath">文件存放路径</param>
-        /// <param name="sourcePdfPath">源pdf文件路径</param>
-        public static void RebuildPdf(List<IPDFElement> elements, string outputPath, string sourcePdfPath)
+        /// <param name="originalDocumentForElements">源pdf文件</param>
+        public static void RebuildPdf(List<IPDFElement> elements, string outputPath, PdfDocument originalDocumentForElements)
         {
             if (elements == null || !elements.Any())
             {
                 Console.WriteLine("没有元素可用于重建 PDF。");
                 return;
             }
-            if (!File.Exists(sourcePdfPath))
+            if (originalDocumentForElements == null || originalDocumentForElements.IsClosed())
             {
-                Console.WriteLine($"错误：源 PDF 文件未找到 {sourcePdfPath}");
+                Console.WriteLine($"错误：提供的原始文档为 null 或已关闭。");
                 return;
             }
 
             PdfWriter pdfWriter = null;
             PdfDocument pdfDoc = null;
-            PdfDocument sourceDoc = null;
+            
 
             Console.WriteLine($"开始重建 PDF 到: {outputPath}");
             try
             {
                 pdfWriter = new PdfWriter(outputPath);
                 pdfDoc = new PdfDocument(pdfWriter);
-                sourceDoc = new PdfDocument(new PdfReader(sourcePdfPath));
 
                 var groupedElementsByPage = elements.GroupBy( e => e.PageNum).OrderBy(g => g.Key);
 
@@ -164,11 +160,19 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
                 {
                     int pageNum = pageGroup.Key;
                     Console.WriteLine($"  重建第 {pageNum} 页...");
-                    var originalPage = sourceDoc.GetPage(pageNum);
-                    if (originalPage == null) {
+
+                    PdfPage originalPage = null;
+                    if (pageNum <= originalDocumentForElements.GetNumberOfPages())
+                    {
+                        originalPage = originalDocumentForElements.GetPage(pageNum);
+                    }
+
+                    if (originalPage == null)
+                    {
                         Console.WriteLine($"    警告: 无法从源PDF获取第 {pageNum} 页。跳过此页。");
                         continue;
                     }
+
 
                     var RectanglePageSize = originalPage.GetPageSizeWithRotation();
                     PageSize pageSize = new PageSize(RectanglePageSize);
@@ -220,7 +224,7 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
             finally
             {
                 pdfDoc?.Close(); // writer 会被 pdfDoc 关闭
-                sourceDoc?.Close();
+                
             }
         }
 
@@ -230,7 +234,7 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
             string textString = string.IsNullOrEmpty(text.TranslatedText)? text.Text : text.TranslatedText;
             if (string.IsNullOrEmpty(textString)) return;
 
-            PdfFont font = GetFont(text,textString);
+            PdfFont font = GetFont(textString);
 
             if (font == null)
             {
@@ -253,8 +257,10 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
         private static void DrawImageElement(PdfCanvas canvas, ImageElement image) { 
             if (image.ImageObject != null && image.Matrix != null)
             {
+                
+                PdfImageXObject copiedImage = image.ImageObject.CopyTo(canvas.GetDocument());
                 canvas.AddXObjectWithTransformationMatrix(
-                image.ImageObject,
+                copiedImage,
                     image.Matrix.Get(iText.Kernel.Geom.Matrix.I11), // a
                     image.Matrix.Get(iText.Kernel.Geom.Matrix.I12), // b
                     image.Matrix.Get(iText.Kernel.Geom.Matrix.I21), // c
