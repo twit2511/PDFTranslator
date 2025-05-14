@@ -110,7 +110,7 @@ namespace PDFTranslate
                     // --- 调用翻译逻辑 ---
                     //MessageBox.Show($"已触发翻译操作，文件路径:\n{filePath}", "翻译占位符", MessageBoxButton.OK, MessageBoxImage.Information);
                     Console.WriteLine("RebuildStart");
-                    Rebulider.RebuildPdf(AdvancedPdfProcessor.ProcessPdf(filePath), outPutPath, filePath);
+                    Rebuilder.RebuildPdf(AdvancedPdfProcessor.ProcessPdf(filePath), outPutPath, filePath);
 
                 }
                 else
