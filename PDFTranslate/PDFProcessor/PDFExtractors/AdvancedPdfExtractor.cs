@@ -18,23 +18,14 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
         /// </summary>
         /// <param name="sourcePdfPath">源PDF文件路径。</param>
         /// <param name="handleProcessedElements">处理完所有页面后，用于接收最终元素列表的回调函数。</param>
-        public static List<IPDFElement> ProcessPdf(string sourcePdfPath)
+        public static List<IPDFElement> ProcessPdf(PdfDocument pdfDoc)
         {
-            if (!File.Exists(sourcePdfPath))
-            {
-                Console.WriteLine($"错误：文件未找到 {sourcePdfPath}");
-                return null;
-            }
 
             var allElements = new List<IPDFElement>();
-            PdfDocument pdfDoc = null;
 
-            Console.WriteLine($"开始处理PDF文件: {sourcePdfPath}");
+            Console.WriteLine($"开始处理PDF文件");
             try
             {
-                PdfReader reader = new PdfReader(sourcePdfPath);
-                // 对于有密码的PDF，需要提供密码: reader = new PdfReader(sourcePdfPath, new ReaderProperties().SetPassword(System.Text.Encoding.Default.GetBytes("your_password")));
-                pdfDoc = new PdfDocument(reader);
                 int numberOfPages = pdfDoc.GetNumberOfPages();
                 Console.WriteLine($"PDF 已加载，共 {numberOfPages} 页。开始逐页提取和分析...");
 
