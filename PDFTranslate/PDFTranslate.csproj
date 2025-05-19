@@ -57,6 +57,9 @@
     <Reference Include="itext.commons, Version=9.1.0.0, Culture=neutral, PublicKeyToken=8354ae6d2174ddca, processorArchitecture=MSIL">
       <HintPath>..\packages\itext.commons.9.1.0\lib\net461\itext.commons.dll</HintPath>
     </Reference>
+    <Reference Include="itext.font_asian, Version=9.2.0.0, Culture=neutral, PublicKeyToken=8354ae6d2174ddca, processorArchitecture=MSIL">
+      <HintPath>..\packages\itext.font-asian.9.2.0\lib\net461\itext.font_asian.dll</HintPath>
+    </Reference>
     <Reference Include="itext.forms, Version=9.1.0.0, Culture=neutral, PublicKeyToken=8354ae6d2174ddca, processorArchitecture=MSIL">
       <HintPath>..\packages\itext.9.1.0\lib\net461\itext.forms.dll</HintPath>
     </Reference>
