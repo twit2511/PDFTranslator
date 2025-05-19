@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
+using iText.Layout.Element;
 using iText.Kernel.Colors;
 using iText.Kernel.Font;
 using iText.Kernel.Geom;
@@ -16,91 +17,104 @@ using System.Windows;
 using iText.Layout.Renderer;
 using System.Windows.Media;
 using iText.Kernel.Pdf.Xobject;
+using iText.IO.Image;
 
 namespace PDFTranslate.PDFProcessor.PDFBuilder
 {
     public static class Rebuilder
     {
-        private static Dictionary<string, PdfFont> _fontCache = new Dictionary<string, PdfFont>();
-        private static PdfFont _globalFallbackFont; // 使用我们下载的字体作为主要的备用字体
-        private const string CustomFontsDirectory = "Fonts"; // 假设字体放在项目输出目录下的 "Fonts" 文件夹
-
+        static PdfFont _cjkFont; // 用于中文文本 (如 STSong-Light)
+        private static PdfFont _defaultLatinFont; // 用于西文文本 (如 Helvetica)
         static Rebuilder()
         {
             try
             {
-                
-                // ---- 使用下载的字体作为全局备用字体 ----
-                string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
-                // 例如，你下载了一个名为 "NotoSansCJKsc-Regular.otf" 的字体来支持中文
-                string fallbackFontFileName = "Roboto_Condensed - Black.ttf"; // 修改为你下载的字体文件名
-                // 或者，如果你用的是 Arial Unicode MS
-                // string fallbackFontFileName = "arialuni.ttf";
-
-                string fallbackFontPath = System.IO.Path.Combine(baseDirectory, CustomFontsDirectory, fallbackFontFileName);
-
-                if (File.Exists(fallbackFontPath))
-                {
-                    _globalFallbackFont = PdfFontFactory.CreateFont(fallbackFontPath, PdfEncodings.IDENTITY_H, PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
-                    Console.WriteLine($"全局备用字体 '{fallbackFontFileName}' 加载成功。");
-                }
-                else
-                {
-                    Console.WriteLine($"警告: 未找到全局备用字体文件 '{fallbackFontPath}'。将尝试使用 Helvetica。");
-                    LoadHelveticaAsFallback();
-                }
+                _cjkFont = PdfFontFactory.CreateFont("STSong-Light",
+                    PdfEncodings.IDENTITY_H,
+                    PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                Console.WriteLine("成功加载 iText 内置 CJK 字体 'STSong-Light' (依赖 itext7.font-asian)。");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"警告: 加载全局备用字体时出错: {ex.Message}。将尝试使用 Helvetica。");
-                LoadHelveticaAsFallback();
+                Console.WriteLine($"警告: 无法加载 iText 内置 CJK 字体 'STSong-Light'。中文可能无法正确显示。");
+                Console.WriteLine($"这通常意味着 'itext7.font-asian' NuGet 包未被引用，或者字体资源不可用。错误: {ex.Message}");
+                _cjkFont = null;
             }
-        }
 
-        private static void LoadHelveticaAsFallback()
-        {
+            // ---- 2. 加载 iText 标准的西文字体 (如 Helvetica) ----
+            // PREFER_NOT_EMBEDDED 因为标准14字体通常不需要嵌入。
             try
             {
-                _globalFallbackFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA, PdfEncodings.WINANSI, PdfFontFactory.EmbeddingStrategy.PREFER_NOT_EMBEDDED);
-                Console.WriteLine("已加载 Helvetica 作为最终备用字体。");
+                _defaultLatinFont = PdfFontFactory.CreateFont(StandardFonts.HELVETICA, PdfEncodings.WINANSI, PdfFontFactory.EmbeddingStrategy.PREFER_NOT_EMBEDDED);
+                Console.WriteLine("成功加载 iText 标准西文字体 'Helvetica'。");
             }
-            catch (Exception helvEx)
+            catch (Exception ex)
             {
-                Console.WriteLine($"严重错误: 无法加载 Helvetica作为备用字体: {helvEx.Message}");
-                // _globalFallbackFont 将为 null，GetFont 方法需要处理这种情况
+                Console.WriteLine($"严重错误: 无法加载 iText 标准西文字体 'Helvetica'。错误: {ex.Message}");
+                _defaultLatinFont = null;
             }
         }
 
         /// <summary>
-        /// 获取用于绘制文本的字体。
-        /// 优先使用 TextElement.OriginalPdfFont，其次尝试从自定义字体目录加载，最后使用全局备用字体。
+        /// 判断文本是否可能包含中日韩字符。
+        /// 这是一个基础的启发式检查。
         /// </summary>
+        private static bool ContainsCjkCharacters(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+            foreach (char c in text)
+            {
+                // CJK Unicode 块通常从 U+2E80 开始 (包括部首、符号、主要表意文字区等)
+                // 这是一个比较宽泛的检查，可以根据需要调整。
+                if (c >= 0x2E80 && c <= 0x9FFF) // 常用CJK统一表意文字范围 U+4E00-U+9FFF
+                {
+                    return true;
+                }
+                // 可以添加更多CJK相关范围的检查，如扩展区等
+            }
+            return false;
+        }
         private static PdfFont GetFont(string textToDraw)
         {
+            bool isCjkText = ContainsCjkCharacters(textToDraw);
+
+            // 1. 如果是CJK文本且CJK字体已加载
+            if (isCjkText && _cjkFont != null)
+            {
+                if (CanFontDisplay(_cjkFont, textToDraw))
+                {
+                    return _cjkFont;
+                }
+                // 即使 STSong-Light 不能完全显示所有字符，对于中文文本，它仍是首选
+                // Console.WriteLine($"警告: STSong-Light 可能无法显示文本中的所有字符: '{textToDraw.Substring(0, Math.Min(10,textToDraw.Length))}'");
+                return _cjkFont;
+            }
+
+            // 2. 如果不是CJK文本，或者CJK字体加载失败，尝试使用默认西文字体
+            if (_defaultLatinFont != null)
+            {
+                if (CanFontDisplay(_defaultLatinFont, textToDraw))
+                {
+                    return _defaultLatinFont;
+                }
+               
+                return _defaultLatinFont;
+            }
+
             
-
-            if (_globalFallbackFont != null && CanFontDisplay(_globalFallbackFont, textToDraw))
+            if (_cjkFont != null)
             {
-                return _globalFallbackFont;
+                // Console.WriteLine("警告: 西文字体加载失败，回退到CJK字体（如果存在）。");
+                return _cjkFont;
             }
 
-           
-            if (_fontCache.TryGetValue("HELVETICA_FINAL", out var helvetica))
-            {
-                if (CanFontDisplay(helvetica, textToDraw)) return helvetica;
-            }
-            try
-            {
-                var finalHelvetica = PdfFontFactory.CreateFont(StandardFonts.HELVETICA, PdfEncodings.WINANSI, PdfFontFactory.EmbeddingStrategy.PREFER_NOT_EMBEDDED);
-                _fontCache["HELVETICA_FINAL"] = finalHelvetica;
-                // 对于Helvetica，CanFontDisplay 对于非WinAnsi字符会返回false，这是正常的
-                return finalHelvetica;
-            }
-            catch (IOException ex)
-            {
-                throw new Exception("无法加载任何可用字体 (包括Helvetica) 来显示文本。", ex);
-            }
+            // 4. 极端情况：所有尝试加载的字体都为null
+            Console.WriteLine($"严重警告: 无法为文本找到任何 iText 提供的可用字体 (页码未知，文本片段: '{textToDraw.Substring(0, Math.Min(10, textToDraw.Length))}...')。文本将不会被正确绘制。");
+            return null;
         }
+
+
+  
 
 
         private static bool CanFontDisplay(PdfFont font, string text)
@@ -241,6 +255,29 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
                 return;
             }
 
+            // ---- BEGIN DEBUG LOGGING ----
+            string fontNameToLog = "NULL FONT";
+            if (font != null && font.GetFontProgram() != null && font.GetFontProgram().GetFontNames() != null)
+            {
+                fontNameToLog = font.GetFontProgram().GetFontNames().GetFontName();
+            }
+            else if (font != null)
+            {
+                fontNameToLog = "Font object exists, but name unavailable";
+            }
+
+            Console.WriteLine($"DEBUG: Page {text.PageNum}, Text: '{textString.Substring(0, Math.Min(20, textString.Length))}', " +
+                              $"Font Chosen: '{fontNameToLog}', " +
+                              $"FontSize: {text.FontSize}, " +
+                              $"FontColor: {text.FontColor},"+
+                              $"CharSpacing: {text.CharacterSpacing}, " +
+                              $"WordSpacing: {text.WordSpacing}, " +
+                              $"HorizScaling: {text.HorizontalScaling}");
+            // ---- END DEBUG LOGGING ----
+
+            
+            
+
             canvas.BeginText()
                 .SetFontAndSize(font, text.FontSize)
                 .SetFillColor(text.FontColor ?? ColorConstants.BLACK)
@@ -252,26 +289,111 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
                 .EndText();
 
         }
+        private static void DrawImageElement(PdfCanvas canvas, ImageElement imageElement)
+        {
+            if (imageElement.ImageObject == null || imageElement.Matrix == null)
+            {
+                Console.WriteLine($"    警告: 图像元素数据不完整，无法绘制 (页 {imageElement.PageNum})");
+                return;
+            }
 
-        private static void DrawImageElement(PdfCanvas canvas, ImageElement image) { 
-            if (image.ImageObject != null && image.Matrix != null)
+            PdfImageXObject originalImageXObject = imageElement.ImageObject;
+            iText.Kernel.Geom.Matrix matrix = imageElement.Matrix;
+            PdfDocument newDocument = canvas.GetDocument();
+
+            try
             {
                 
-                PdfImageXObject copiedImage = image.ImageObject.CopyTo(canvas.GetDocument());
-                canvas.AddXObjectWithTransformationMatrix(
-                copiedImage,
-                    image.Matrix.Get(iText.Kernel.Geom.Matrix.I11), // a
-                    image.Matrix.Get(iText.Kernel.Geom.Matrix.I12), // b
-                    image.Matrix.Get(iText.Kernel.Geom.Matrix.I21), // c
-                    image.Matrix.Get(iText.Kernel.Geom.Matrix.I22), // d
-                    image.Matrix.Get(iText.Kernel.Geom.Matrix.I31), // e
-                    image.Matrix.Get(iText.Kernel.Geom.Matrix.I32));// f
 
+                byte[] imageBytes = null;
+                PdfStream imageStream = originalImageXObject.GetPdfObject(); // PdfImageXObject 本身就是一个 PdfStream
+
+                if (imageStream != null)
+                {
+                    // 尝试获取原始（可能已压缩）的字节
+                    // 注意：对于某些复杂的图像，这可能不是直接的图像文件格式字节
+                    imageBytes = imageStream.GetBytes(false); // false 表示不解码，获取原始流字节
+                }
+
+                if (imageBytes == null || imageBytes.Length == 0)
+                {
+                    Console.WriteLine($"    警告: 无法从 PdfImageXObject (页 {imageElement.PageNum}) 获取原始图像字节。尝试使用 CopyTo。");
+                    // 回退到 CopyTo 方案
+                    UseCopyToForImage(canvas, originalImageXObject, matrix);
+                    return;
+                }
+
+                ImageData imageData = null;
+                try
+                {
+                    imageData = ImageDataFactory.Create(imageBytes);
+                }
+                catch (Exception exFactory)
+                {
+                    Console.WriteLine($"    警告: 使用 ImageDataFactory 从提取的字节创建图像失败 (页 {imageElement.PageNum}): {exFactory.Message}。尝试使用 CopyTo。");
+                    // 如果 ImageDataFactory 失败 (例如，字节不是它能识别的格式)，回退到 CopyTo
+                    UseCopyToForImage(canvas, originalImageXObject, matrix);
+                    return;
+                }
+
+                // 创建一个 iText.Layout.Element.Image 对象
+                // 这个 Image 对象将负责将其 XObject 正确地添加到新文档中
+                Image layoutImage = new Image(imageData);
+
+                // 获取属于新文档的 PdfXObject
+                // 当我们通过 iText.Layout.Element.Image 创建 XObject 时，它会自动属于正确的文档
+                PdfImageXObject newPdfImageXObject = new PdfImageXObject(imageData);
+
+                if (newPdfImageXObject != null)
+                {
+                    Console.WriteLine($"    信息: 通过 ImageDataFactory 重新创建图像成功 (页 {imageElement.PageNum})。");
+                    canvas.AddXObjectWithTransformationMatrix(
+                        newPdfImageXObject,
+                        matrix.Get(iText.Kernel.Geom.Matrix.I11), // a
+                        matrix.Get(iText.Kernel.Geom.Matrix.I12), // b
+                        matrix.Get(iText.Kernel.Geom.Matrix.I21), // c
+                        matrix.Get(iText.Kernel.Geom.Matrix.I22), // d
+                        matrix.Get(iText.Kernel.Geom.Matrix.I31), // e
+                        matrix.Get(iText.Kernel.Geom.Matrix.I32)  // f
+                    );
+                }
+                else
+                {
+                    Console.WriteLine($"    警告: 从 ImageData 创建的 Layout.Image 未能生成 PdfXObject (页 {imageElement.PageNum})。尝试使用 CopyTo。");
+                    UseCopyToForImage(canvas, originalImageXObject, matrix);
+                }
             }
-            else{
-                Console.WriteLine($"    警告: 图像元素数据不完整，无法绘制 (页 {image.PageNum})");
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    错误: 从原始数据重新创建图像时发生意外错误 (页 {imageElement.PageNum}): {ex.Message}。尝试使用 CopyTo 作为最终回退。");
+                try
+                {
+                    UseCopyToForImage(canvas, originalImageXObject, matrix);
+                }
+                catch (Exception exCopyToFallback)
+                {
+                    Console.WriteLine($"    严重错误: 最终回退到 CopyTo 方案也失败了 (页 {imageElement.PageNum}): {exCopyToFallback.Message}");
+                }
             }
         }
+
+        // 辅助方法，用于原始的 CopyTo 逻辑
+        private static void UseCopyToForImage(PdfCanvas canvas, PdfImageXObject imageXObject, iText.Kernel.Geom.Matrix matrix)
+        {
+            Console.WriteLine($"    信息: 正在尝试使用 CopyTo 绘制图像 (页 {imageXObject.GetPdfObject().GetIndirectReference()?.GetDocument().GetPageNumber(imageXObject.GetPdfObject())})"); // 尝试获取原始页码
+            PdfImageXObject copiedImage = imageXObject.CopyTo(canvas.GetDocument());
+            canvas.AddXObjectWithTransformationMatrix(
+                copiedImage,
+                matrix.Get(iText.Kernel.Geom.Matrix.I11),
+                matrix.Get(iText.Kernel.Geom.Matrix.I12),
+                matrix.Get(iText.Kernel.Geom.Matrix.I21),
+                matrix.Get(iText.Kernel.Geom.Matrix.I22),
+                matrix.Get(iText.Kernel.Geom.Matrix.I31),
+                matrix.Get(iText.Kernel.Geom.Matrix.I32)
+            );
+        }
+
+        
 
         private static void DrawLineElement(PdfCanvas canvas, LineElement line) {
 
