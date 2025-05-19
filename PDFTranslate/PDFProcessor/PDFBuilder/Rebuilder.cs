@@ -221,6 +221,10 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
                 Console.WriteLine(ex.StackTrace);
                 Console.ResetColor();
             }
+            finally
+            {
+                pdfDoc?.Close();
+            }
         }
 
         private static void DrawTextElement(PdfCanvas canvas, TextElement text)
