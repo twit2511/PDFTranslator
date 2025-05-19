@@ -63,12 +63,6 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
                 Console.WriteLine(ex.StackTrace);
                 Console.ResetColor();
             }
-            finally
-            {
-                // 确保文档被关闭
-                pdfDoc?.Close(); // 关闭 pdfDoc 会自动关闭 reader
-                Console.WriteLine("\nPDF 文档已关闭。");
-            }
 
             Console.WriteLine($"\n提取与分析完成。共处理 {allElements.Count} 个元素。");
 

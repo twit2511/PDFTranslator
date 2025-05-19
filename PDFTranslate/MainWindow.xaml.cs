@@ -110,11 +110,15 @@ namespace PDFTranslate
                     // 对于有密码的PDF，需要提供密码: reader = new PdfReader(sourcePdfPath, new ReaderProperties().SetPassword(System.Text.Encoding.Default.GetBytes("your_password")));
                     PdfDocument pdfDoc = new PdfDocument(reader);
                     string outPutPath = @"E:\test\MyNewPdf.pdf";
+
                     // --- 调用翻译逻辑 ---
                     //MessageBox.Show($"已触发翻译操作，文件路径:\n{filePath}", "翻译占位符", MessageBoxButton.OK, MessageBoxImage.Information);
                     Console.WriteLine("RebuildStart");
-                    Rebuilder.RebuildPdf(AdvancedPdfProcessor.ProcessPdf(filePat), outPutPath, filePath);
-                    
+                    Rebuilder.RebuildPdf(AdvancedPdfProcessor.ProcessPdf(pdfDoc),outPutPath,pdfDoc);
+
+                    pdfDoc.Close();
+                    Console.WriteLine("\nPDF 文档已关闭。");
+
                 }
                 else
                 {
