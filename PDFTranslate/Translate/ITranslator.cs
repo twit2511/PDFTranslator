@@ -1,6 +1,6 @@
 ﻿// PdfGoogleTranslatorApp/Interfaces/ITranslator.cs
 using System.Threading.Tasks;
-namespace PDFTranslate.Interfaces
+namespace PDFTranslate.Translate
 {
     public interface ITranslator
     {
