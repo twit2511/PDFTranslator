@@ -18,6 +18,7 @@ using iText.Layout.Renderer;
 using System.Windows.Media;
 using iText.Kernel.Pdf.Xobject;
 using iText.IO.Image;
+using System.Reflection;
 
 namespace PDFTranslate.PDFProcessor.PDFBuilder
 {
@@ -27,18 +28,23 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
         private static PdfFont _defaultLatinFont; // 用于西文文本 (如 Helvetica)
         static Rebuilder()
         {
-            try
+            _cjkFont = LoadEmbeddedFont("PDFTranslate.Fonts.NotoSansSC-6.ttf");
+
+            if (_cjkFont == null)
             {
-                _cjkFont = PdfFontFactory.CreateFont("STSong-Light",
-                    PdfEncodings.IDENTITY_H,
-                    PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
-                Console.WriteLine("成功加载 iText 内置 CJK 字体 'STSong-Light' (依赖 itext7.font-asian)。");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"警告: 无法加载 iText 内置 CJK 字体 'STSong-Light'。中文可能无法正确显示。");
-                Console.WriteLine($"这通常意味着 'itext7.font-asian' NuGet 包未被引用，或者字体资源不可用。错误: {ex.Message}");
-                _cjkFont = null;
+                try
+                {
+                    _cjkFont = PdfFontFactory.CreateFont("STSong-Light",
+                        PdfEncodings.IDENTITY_H,
+                        PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                    Console.WriteLine("成功加载 iText 内置 CJK 字体 'STSong-Light' (依赖 itext7.font-asian)。");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"警告: 无法加载 iText 内置 CJK 字体 'STSong-Light'。中文可能无法正确显示。");
+                    Console.WriteLine($"这通常意味着 'itext7.font-asian' NuGet 包未被引用，或者字体资源不可用。错误: {ex.Message}");
+                    _cjkFont = null;
+                }
             }
 
             // ---- 2. 加载 iText 标准的西文字体 (如 Helvetica) ----
@@ -52,6 +58,41 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
             {
                 Console.WriteLine($"严重错误: 无法加载 iText 标准西文字体 'Helvetica'。错误: {ex.Message}");
                 _defaultLatinFont = null;
+            }
+        }
+
+        private static PdfFont LoadEmbeddedFont(string resourceName)
+        {
+            try
+            {
+                var assembly = Assembly.GetExecutingAssembly(); // 或者 Assembly.GetCallingAssembly()，或 typeof(Rebuilder).Assembly
+                // 资源名称通常是: <默认命名空间>.<文件夹名（如果存在）>.<文件名>
+                // 例如，如果你的项目默认命名空间是 "PDFTranslate"，字体在 "Fonts" 文件夹下，文件名为 "NotoSansSC-Regular.otf"，
+                // 那么资源名称就是 "PDFTranslate.Fonts.NotoSansSC-Regular.otf"
+
+                using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+                {
+                    if (stream == null)
+                    {
+                        Console.WriteLine($"警告: 无法找到嵌入的资源 '{resourceName}'。");
+                        return null;
+                    }
+
+                    byte[] fontBytes = new byte[stream.Length];
+                    stream.Read(fontBytes, 0, fontBytes.Length);
+
+                    PdfFont font = PdfFontFactory.CreateFont(fontBytes,
+                        PdfEncodings.IDENTITY_H,
+                        PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED, // 嵌入字体到PDF中
+                        true); // true for embedded fonts, important for some font types
+                    Console.WriteLine($"成功加载嵌入的 CJK 字体 '{resourceName}'。");
+                    return font;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"警告: 加载嵌入的 CJK 字体 '{resourceName}' 失败。错误: {ex.Message}");
+                return null;
             }
         }
 
@@ -266,7 +307,7 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
                 fontNameToLog = "Font object exists, but name unavailable";
             }
 
-            Console.WriteLine($"DEBUG: Page {text.PageNum}, Text: '{textString.Substring(0, Math.Min(20, textString.Length))}', " +
+            Console.WriteLine($"\nDEBUG: Page {text.PageNum}, Text: '{textString.Substring(0, Math.Min(20, textString.Length))}', " +
                               $"Font Chosen: '{fontNameToLog}', " +
                               $"FontSize: {text.FontSize}, " +
                               $"FontColor: {text.FontColor},"+
