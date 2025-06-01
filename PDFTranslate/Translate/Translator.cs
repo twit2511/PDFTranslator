@@ -1,6 +1,7 @@
 ﻿using PDFTranslate.Interfaces;
 using System;
-using System.Net; 
+using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 using TencentCloud.Common;
 using TencentCloud.Common.Profile;
@@ -19,7 +20,15 @@ namespace PDFTranslate.translators
         private const string HardcodedRegion = "ap-guangzhou";
         // --- 硬编码结束 ---
 
+        //如果依然超时增加最大重试次数和延迟时间
+        private const int MaxRetryAttempts = 3; // 最大重试次数
+        private const int InitialRetryDelayMs = 500; // 初始重试延迟(毫秒)
+        private const int MaxRetryDelayMs = 5000; // 最大重试延迟(毫秒)
+        private const int RequestTimeoutMs = 10000; // 请求超时时间(毫秒)
+
         public string Name => "腾讯云翻译 (硬编码凭据 - 不安全)";
+
+
 
         /// <summary>
         /// 无参构造Translator实例
@@ -50,9 +59,37 @@ namespace PDFTranslate.translators
             if (string.IsNullOrWhiteSpace(sourceLanguage) || string.IsNullOrWhiteSpace(targetLanguage))
                 throw new ArgumentException("源语言和目标语言代码不能为空。");
 
+            int retryCount = 0;
+            int delayMs = InitialRetryDelayMs;
+
+            while (true)
+            {
+                try
+                {
+                    return ExecuteTranslation(textToTranslate, sourceLanguage, targetLanguage);
+                }
+                catch (Exception ex) when (IsTransientError(ex) && retryCount < MaxRetryAttempts)
+                {
+                    retryCount++;
+                    Console.WriteLine($"翻译请求失败，正在进行第 {retryCount} 次重试... 错误: {ex.Message}");
+
+                    // 使用指数退避算法
+                    Thread.Sleep(delayMs);
+                    delayMs = Math.Min(delayMs * 2, MaxRetryDelayMs);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"所有重试尝试均失败: {ex.ToString()}");
+                    throw;
+                }
+            }
+        }
+
+        //请求服务函数
+        private string ExecuteTranslation(string textToTranslate, string sourceLanguage, string targetLanguage)
+        {
             try
             {
-                // 使用硬编码的凭据
                 Credential cred = new Credential
                 {
                     SecretId = HardcodedSecretId,
@@ -60,10 +97,13 @@ namespace PDFTranslate.translators
                 };
 
                 ClientProfile clientProfile = new ClientProfile();
-                HttpProfile httpProfile = new HttpProfile { Endpoint = "tmt.tencentcloudapi.com" };
+                HttpProfile httpProfile = new HttpProfile
+                {
+                    Endpoint = "tmt.tencentcloudapi.com",
+                    Timeout = RequestTimeoutMs // 设置请求超时
+                };
                 clientProfile.HttpProfile = httpProfile;
 
-                // 使用硬编码的区域
                 TmtClient client = new TmtClient(cred, HardcodedRegion, clientProfile);
 
                 TextTranslateRequest req = new TextTranslateRequest
@@ -74,32 +114,50 @@ namespace PDFTranslate.translators
                     ProjectId = 0
                 };
 
+                // 同步调用
                 TextTranslateResponse resp = client.TextTranslate(req).Result;
                 return resp.TargetText ?? string.Empty;
             }
-            catch (TencentCloudSDKException e) // 捕获腾讯云特定的异常
+            catch (TencentCloudSDKException e)
             {
                 Console.Error.WriteLine($"腾讯云翻译 API 错误: Code={e.ErrorCode}, Msg={e.Message}, RequestId={e.RequestId}");
                 string errorMsg = $"腾讯云翻译失败: {e.Message}";
-                // 根据错误码提供更具体信息的逻辑
+
                 switch (e.ErrorCode)
                 {
                     case "AuthFailure.SignatureFailure":
                     case "AuthFailure.SecretIdNotFound":
                         errorMsg = "腾讯云认证失败，请检查硬编码的 SecretId 和 SecretKey。"; break;
-                    // ... (其他错误码处理保持不变) ...
-                    case "LimitExceeded": case "RequestLimitExceeded": errorMsg = "腾讯云调用超限..."; break;
-                    case "UnsupportedOperation.UnsupportedLanguage": errorMsg = "腾讯云不支持语言..."; break;
-                    case "FailedOperation.NoFreeAmount": errorMsg = "腾讯云免费额度用完..."; break;
-                    case "FailedOperation.ServiceIsolate": errorMsg = "腾讯云账户欠费..."; break;
+                    case "LimitExceeded":
+                    case "RequestLimitExceeded":
+                        errorMsg = "腾讯云调用超限，请稍后再试或增加重试间隔。"; break;
+                    case "UnsupportedOperation.UnsupportedLanguage":
+                        errorMsg = "腾讯云不支持该语言对。"; break;
+                    case "FailedOperation.NoFreeAmount":
+                        errorMsg = "腾讯云免费额度已用完。"; break;
+                    case "FailedOperation.ServiceIsolate":
+                        errorMsg = "腾讯云账户欠费。"; break;
+                    case "RequestTimeout":
+                        errorMsg = "腾讯云请求超时。"; break;
                 }
                 throw new Exception(errorMsg, e);
             }
-            catch (Exception e) // 捕获其他通用异常
+        }
+
+        //判断是否是暂时性错误
+        private bool IsTransientError(Exception ex)
+        {
+            if (ex is TencentCloudSDKException sdkEx)
             {
-                Console.Error.WriteLine($"调用腾讯云翻译时发生意外错误: {e.ToString()}");
-                throw new Exception("调用腾讯云翻译时发生意外错误。", e);
+                // 这些错误码表示可能通过重试解决的问题
+                return sdkEx.ErrorCode == "RequestLimitExceeded" ||
+                       sdkEx.ErrorCode == "LimitExceeded" ||
+                       sdkEx.ErrorCode == "InternalError" ||
+                       sdkEx.ErrorCode == "RequestTimeout";
             }
+
+            // 网络相关的异常通常可以重试
+            return ex is WebException || ex is TimeoutException;
         }
     }
 }
