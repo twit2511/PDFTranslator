@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,28 +21,25 @@ namespace PDFTranslate.Translate
         // --- 硬编码结束 ---
 
         //如果依然超时增加最大重试次数和延迟时间
-        private const int MaxRetryAttempts = 3; // 最大重试次数
-        private const int InitialRetryDelayMs = 500; // 初始重试延迟(毫秒)
-        private const int MaxRetryDelayMs = 5000; // 最大重试延迟(毫秒)
-        private const int RequestTimeoutMs = 10000; // 请求超时时间(毫秒)
+        private const int MaxRetryAttempts = 5;                   // 最大重试次数
+        private const int InitialRetryDelayMs = 1000;             // 初始重试延迟(毫秒)
+        private const int MaxRetryDelayMs = 10000;                // 最大重试延迟(毫秒)
+        private const int RequestTimeoutMs = 30000;               // 请求超时时间(毫秒)
+        private const int ReadWriteTimeoutMs = 60000;             // 读写超时时间(毫秒)
+        private const int MaxTextLength = 1000;                   // 单次请求最大文本长度
+        private const int MaxConcurrentRequests = 5;              // 最大并发请求数
+        private const int MinRequestIntervalMs = 100;             // 最小请求间隔(毫秒)
 
-        public string Name => "腾讯云翻译 (硬编码凭据 - 不安全)";
+        public string Name => "腾讯云翻译";
+
+        // 控制变量
+        private static readonly SemaphoreSlim _throttler = new SemaphoreSlim(MaxConcurrentRequests, MaxConcurrentRequests);
+        private static readonly object _timingLock = new object();
+        private static DateTime _lastRequestTime = DateTime.MinValue;
 
 
 
-        /// <summary>
-        /// 无参构造Translator实例
-        /// </summary>
-        /// <exception cref="InvalidOperationException"></exception>
-        // 使用无参数构造函数
-        public Translator()
-        {
-            // 检查硬编码的值是否为空
-            if (string.IsNullOrWhiteSpace(HardcodedSecretId) || string.IsNullOrWhiteSpace(HardcodedSecretKey) || string.IsNullOrWhiteSpace(HardcodedRegion))
-            {
-                throw new InvalidOperationException("硬编码的腾讯云凭据包含空值，请检查代码。");
-            }
-        }
+
 
         /// <summary>
         /// 翻译函数
@@ -58,6 +56,29 @@ namespace PDFTranslate.Translate
             if (string.IsNullOrWhiteSpace(sourceLanguage) || string.IsNullOrWhiteSpace(targetLanguage))
                 throw new ArgumentException("源语言和目标语言代码不能为空。");
 
+            // 长文本自动分块处理
+            if (textToTranslate.Length > MaxTextLength)
+            {
+                return ProcessLongText(textToTranslate, sourceLanguage, targetLanguage);
+            }
+
+            EnforceRateLimit();
+
+            // 应用并发控制
+            _throttler.Wait();
+
+            try
+            {
+                return TranslateWithRetry(textToTranslate, sourceLanguage, targetLanguage);
+            }
+            finally
+            {
+                _throttler.Release();
+            }
+        }
+
+        private string TranslateWithRetry(string text, string source, string target)
+        {
             int retryCount = 0;
             int delayMs = InitialRetryDelayMs;
 
@@ -65,21 +86,21 @@ namespace PDFTranslate.Translate
             {
                 try
                 {
-                    return ExecuteTranslation(textToTranslate, sourceLanguage, targetLanguage);
+                    return ExecuteTranslation(text, source, target);
                 }
                 catch (Exception ex) when (IsTransientError(ex) && retryCount < MaxRetryAttempts)
                 {
                     retryCount++;
-                    Console.WriteLine($"翻译请求失败，正在进行第 {retryCount} 次重试... 错误: {ex.Message}");
+                    Console.WriteLine($"第 {retryCount} 次重试，延迟 {delayMs}ms... 错误: {ex.Message}");
 
-                    // 使用指数退避算法
+                    // 指数退避
                     Thread.Sleep(delayMs);
                     delayMs = Math.Min(delayMs * 2, MaxRetryDelayMs);
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"所有重试尝试均失败: {ex.ToString()}");
-                    throw;
+                    Console.Error.WriteLine($"翻译失败: {ex}");
+                    throw new Exception(FormatErrorMessage(ex), ex);
                 }
             }
         }
@@ -143,6 +164,49 @@ namespace PDFTranslate.Translate
             }
         }
 
+        private HttpProfile CreateHttpProfile()
+        {
+            return new HttpProfile
+            {
+                Endpoint = "tmt.tencentcloudapi.com",
+                Timeout = RequestTimeoutMs,
+                Protocol = "https",
+                WebProxy = null,
+                
+            };
+        }
+
+        private string ProcessLongText(string text, string source, string target)
+        {
+            // 简单分句逻辑（可按需改进）
+            var sentences = text.Split(new[] { '.', '。', '!', '！', '?', '？', '\n', '\r' },
+                                     StringSplitOptions.RemoveEmptyEntries);
+
+            var results = new List<string>();
+            foreach (var sentence in sentences)
+            {
+                if (!string.IsNullOrWhiteSpace(sentence))
+                {
+                    results.Add(TranslateAsync(sentence.Trim(), source, target));
+                }
+            }
+
+            return string.Join(" ", results);
+        }
+
+        private void EnforceRateLimit()
+        {
+            lock (_timingLock)
+            {
+                var elapsed = DateTime.Now - _lastRequestTime;
+                if (elapsed.TotalMilliseconds < MinRequestIntervalMs)
+                {
+                    Thread.Sleep(MinRequestIntervalMs - (int)elapsed.TotalMilliseconds);
+                }
+                _lastRequestTime = DateTime.Now;
+            }
+        }
+
         //判断是否是暂时性错误
         private bool IsTransientError(Exception ex)
         {
@@ -157,6 +221,15 @@ namespace PDFTranslate.Translate
 
             // 网络相关的异常通常可以重试
             return ex is WebException || ex is TimeoutException;
+        }
+
+        private string FormatErrorMessage(Exception ex)
+        {
+            if (ex is TencentCloudSDKException sdkEx)
+            {
+                return ex.Message;
+            }
+            return ex.Message;
         }
     }
 }
