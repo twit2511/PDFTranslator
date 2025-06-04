@@ -208,53 +208,130 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
         }
 
         // --- 文本合并逻辑 ---
-        // 这个方法是你之前提供的，用于行内合并
-        private bool AreChunksMergeable(TextElement prev, TextElement current, float yTolerance = 2.0f, float xToleranceFactor = 1.5f)
+
+        private const float RELAXED_INTRA_LINE_Y_TOLERANCE_FACTOR = 0.7f; // 稍微放宽Y轴容差
+        private const float RELAXED_INTRA_LINE_X_SPACE_FACTOR_MAX = 2.5f; // 稍微放宽X轴最大间距
+        private const float MIN_FONT_SIZE_FOR_ACCURATE_SPACING = 8.0f; // 用于判断何时使用字号估算间距
+        private bool AreChunksMergeable(TextElement prev, TextElement current) // 移除了默认参数，让调用处更明确
         {
             if (prev == null || current == null) return false;
             if (prev.PageNum != current.PageNum) return false;
+
+            // 样式检查: 字体名称、颜色、水平缩放
+            // 字体大小的比较放后面，因为它与Y坐标容差有关
             if (prev.FontName != current.FontName ||
-                Math.Abs(prev.FontSize - current.FontSize) > STYLE_CHANGE_TOLERANCE_FONTSIZE || // 使用常量
-                !AreColorsSimilar(prev.FontColor, current.FontColor) ||
-                Math.Abs(prev.HorizontalScaling - current.HorizontalScaling) > STYLE_CHANGE_TOLERANCE_HSCALE) // 使用常量
+                !AreColorsSimilar(prev.FontColor, current.FontColor) || // 颜色比较可以稍微宽松一点点
+                Math.Abs(prev.HorizontalScaling - current.HorizontalScaling) > STYLE_CHANGE_TOLERANCE_HSCALE)
             {
                 return false;
             }
+
+            // Y坐标检查 (判断是否在同一行)
+            // 使用 prev 和 current 中较大的字号来计算容差，或者取平均？这里用较大者更保守
+            float largerFontSize = Math.Max(prev.FontSize, current.FontSize);
+            if (largerFontSize <= 0) largerFontSize = 10f; // 避免除零或负数，给个默认值
+            float dynamicYTolerance = largerFontSize * RELAXED_INTRA_LINE_Y_TOLERANCE_FACTOR; // 使用建议的宽松容差
+
+            // 比较基线Y坐标 (StartPoint.Y)
+            // 有些PDF文本块的Y坐标可能用的是中心或顶部，这里假设是基线
+            // 或者比较 BoundingBox 的 Y 中心
             float prevY = prev.StartPoint.Get(Vector.I2);
             float currentY = current.StartPoint.Get(Vector.I2);
-            // Y容差应该与字号相关
-            float dynamicYTolerance = Math.Max(prev.FontSize, current.FontSize) * INTRA_LINE_Y_TOLERANCE_FACTOR;
-            if (Math.Abs(prevY - currentY) > dynamicYTolerance) // 使用动态容差
-            {
-                return false;
-            }
-            float prevEndX = prev.EndPoint.Get(Vector.I1);
-            float currentStartX = current.StartPoint.Get(Vector.I1);
-            float avgCharWidthPrev = prev.Text.Length > 0 ? (prev.EndPoint.Get(Vector.I1) - prev.StartPoint.Get(Vector.I1)) / prev.Text.Length : prev.FontSize * 0.5f;
-            float maxSpace = avgCharWidthPrev * INTRA_LINE_X_SPACE_FACTOR_MAX; // 使用常量
-            float minOverlapOrGap = avgCharWidthPrev * INTRA_LINE_X_SPACE_FACTOR_MIN; // 允许的小间隙或重叠
+            // 或者使用 BBox 的 Y 中心：
+            // float prevY = prev.ApproximateBoundingBox.GetY() + prev.ApproximateBoundingBox.GetHeight() / 2;
+            // float currentY = current.ApproximateBoundingBox.GetY() + current.ApproximateBoundingBox.GetHeight() / 2;
 
-            if (currentStartX < prevEndX - INTRA_LINE_X_OVERLAP_TOLERANCE || // 使用常量允许重叠
-                currentStartX > prevEndX + maxSpace)
+
+            if (Math.Abs(prevY - currentY) > dynamicYTolerance)
             {
-                // 进一步检查是否是紧密连接但被分割的块
-                if (!(currentStartX >= prevEndX - minOverlapOrGap && currentStartX <= prevEndX + minOverlapOrGap))
+                // 如果Y坐标差异较大，再检查一下字体大小是否也差异很大，
+                // 因为有时同一行的上标下标会导致Y变化，但字体大小也不同
+                if (Math.Abs(prev.FontSize - current.FontSize) > STYLE_CHANGE_TOLERANCE_FONTSIZE * 2) // 更严格的字号变化才算不同行
                 {
                     return false;
                 }
+                // 如果字号相近，但Y差值略大，可以考虑是否是因为基线对齐问题，
+                // 例如，一个字符的基线在底部，另一个在中间。
+                // 此时可以尝试比较 BoundingBox 的重叠度。
+                // 这是一个复杂情况，暂时先依赖 dynamicYTolerance
             }
+
+
+            // 字体大小检查 (放在Y坐标检查后，因为Y容差依赖它)
+            if (Math.Abs(prev.FontSize - current.FontSize) > STYLE_CHANGE_TOLERANCE_FONTSIZE)
+            {
+                return false;
+            }
+
+            // X坐标检查 (判断水平间距)
+            float prevEndX = prev.ApproximateBoundingBox.GetRight(); // 使用BBox的右边界
+            float currentStartX = current.ApproximateBoundingBox.GetLeft(); // 使用BBox的左边界
+
+            // 如果 prev.EndPoint 和 current.StartPoint 更可靠，也可以用它们：
+            // float prevEndX = prev.EndPoint.Get(Vector.I1);
+            // float currentStartX = current.StartPoint.Get(Vector.I1);
+
+            float spaceBetween = currentStartX - prevEndX;
+
+            // 计算允许的最大间距
+            // 使用 prev 和 current 中较小的字号来估算空格宽度，因为如果一个是标题一个是正文，空格应按正文算
+            float smallerFontSize = Math.Min(prev.FontSize, current.FontSize);
+            if (smallerFontSize <= 0) smallerFontSize = 10f; // 默认值
+
+            // 使用一个更稳定的平均字符宽度估算
+            // 0.5 到 0.6 倍字号通常是一个字符的平均渲染宽度（非等宽字体）
+            float avgCharWidthApproximation = smallerFontSize * 0.6f;
+            // 如果文本块很短，直接用字号估算可能更准
+            if (prev.Text.Length > 0 && prev.FontSize > MIN_FONT_SIZE_FOR_ACCURATE_SPACING && prev.ApproximateBoundingBox.GetWidth() > 0)
+            {
+                avgCharWidthApproximation = prev.ApproximateBoundingBox.GetWidth() / prev.Text.Length;
+            }
+
+
+            float maxAllowedSpace = avgCharWidthApproximation * RELAXED_INTRA_LINE_X_SPACE_FACTOR_MAX; // 使用建议的宽松容差
+            float minAllowedOverlap = -(avgCharWidthApproximation * 0.5f); // 允许一定的重叠，比如半个字符宽度
+
+            // 如果 prev 的 BBox.Right 小于 current 的 BBox.Left (即 current 在 prev 右边)
+            if (spaceBetween > maxAllowedSpace)
+            {
+                return false; // 间距过大
+            }
+            // 如果 current 在 prev 左边，或者重叠过多 (spaceBetween 是负数)
+            if (spaceBetween < minAllowedOverlap - INTRA_LINE_X_OVERLAP_TOLERANCE) // 减去一个额外的重叠容差
+            {
+                // 除非是上标/下标等特殊情况，否则不应大幅度重叠或顺序颠倒
+                // 这里可以增加一个判断：如果 prev 的 X 比 current 的 X 大很多，则认为不是连续的
+                if (prev.ApproximateBoundingBox.GetLeft() > current.ApproximateBoundingBox.GetRight())
+                {
+                    return false; // prev 完全在 current 右边，这不符合正常阅读顺序的合并
+                }
+                // 进一步检查：如果重叠很多，但Y坐标确实非常接近，并且文本方向一致，可能仍需合并
+                // (此逻辑较复杂，暂时先用上面的判断)
+            }
+
+            // 确保 current 不是在 prev 的“内部”开始（极端重叠）
+            // 即 current.X 不应远小于 prev.X
+            if (current.ApproximateBoundingBox.GetLeft() < prev.ApproximateBoundingBox.GetLeft() - avgCharWidthApproximation)
+            {
+                // 如果 current 开始位置比 prev 开始位置还靠左一个字符以上，可能不是顺序的
+                // 但也要考虑 prev 可能只有一个标点符号的情况
+                if (prev.Text.Length > 1) return false;
+            }
+
+
             return true;
         }
 
         // 这个方法是你之前提供的，用于合并行内块
         private TextElement CombineTextChunks(List<TextElement> chunks)
         {
+            chunks = chunks.OrderBy(c => c.ApproximateBoundingBox.GetLeft()).ToList();
             if (chunks == null || !chunks.Any()) return null;
             if (chunks.Count == 1) return chunks[0];
             TextElement firstChunk = chunks[0];
             TextElement lastChunk = chunks.Last(); // 需要最后一个块来确定 EndPoint
             // 行内合并，直接连接文本，因为它们在同一视觉行
-            string combinedText = string.Join(" ", chunks.Select(c => c.Text));
+            string combinedText = string.Join("", chunks.Select(c => c.Text));
             float minX = chunks.Min(c => c.ApproximateBoundingBox.GetLeft());
             float minY = chunks.Min(c => c.ApproximateBoundingBox.GetBottom());
             float maxX = chunks.Max(c => c.ApproximateBoundingBox.GetRight());
@@ -275,7 +352,7 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
                 HorizontalScaling = firstChunk.HorizontalScaling,
                 OriginalFont = firstChunk.OriginalFont,
                 ElementType = firstChunk.ElementType,
-                NeedsTranslated = firstChunk.NeedsTranslated,
+                NeedsTranslated = chunks.Any(c => c.NeedsTranslated) // 如果任一子块需要翻译,
             };
         }
 
@@ -367,67 +444,121 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
             return paragraphs;
         }
 
+        private const float RELAXED_PARAGRAPH_LINE_SPACING_FACTOR = 1.0f; // 稍微放宽行间距因子
+        private const float PARAGRAPH_FONT_SIZE_TOLERANCE_FACTOR = 0.1f; // 段落内行间字体大小差异容忍度 (10%)
+        private const float PARAGRAPH_HANGING_INDENT_TOLERANCE_FACTOR = 2.0f; // 悬挂缩进的容差倍数
         private bool AreLinesMergeableForParagraph(TextElement paragraphFirstLine, TextElement prevLineInParagraph, TextElement currentLineToTest)
         {
             if (prevLineInParagraph.PageNum != currentLineToTest.PageNum) return false;
 
-            if (paragraphFirstLine.FontName != currentLineToTest.FontName && prevLineInParagraph.FontName != currentLineToTest.FontName)
+            // 检查字体名称是否剧烈变化 (允许段落内有一些样式变化，但不是完全不同字体系列)
+            // 这一块可以根据实际情况调整，如果段落内字体变化很常见，可以放宽
+            if (prevLineInParagraph.FontName != currentLineToTest.FontName)
             {
-                if (prevLineInParagraph.FontName != currentLineToTest.FontName) return false;
-            }
-            float fontSizeTolerance = Math.Max(paragraphFirstLine.FontSize, currentLineToTest.FontSize) * 0.2f;
-            if (Math.Abs(paragraphFirstLine.FontSize - currentLineToTest.FontSize) > fontSizeTolerance &&
-                Math.Abs(prevLineInParagraph.FontSize - currentLineToTest.FontSize) > STYLE_CHANGE_TOLERANCE_FONTSIZE)
-            {
-                return false;
+                // 可以添加更复杂的字体相似度比较，例如忽略 "Bold", "Italic" 等后缀
+                // 暂时先简单判断不相等
+                // return false; // 如果严格要求字体一致，取消注释此行
             }
 
-            float verticalDistance = prevLineInParagraph.StartPoint.Get(Vector.I2) - currentLineToTest.StartPoint.Get(Vector.I2);
+            // 字体大小比较
+            // 允许段落内行与行之间有轻微的字体大小变化
+            float fontSizeDiff = Math.Abs(prevLineInParagraph.FontSize - currentLineToTest.FontSize);
+            float avgFontSizeForTolerance = (prevLineInParagraph.FontSize + currentLineToTest.FontSize) / 2f;
+            if (avgFontSizeForTolerance <= 0) avgFontSizeForTolerance = 10f;
+
+            if (fontSizeDiff > avgFontSizeForTolerance * PARAGRAPH_FONT_SIZE_TOLERANCE_FACTOR) // 例如，允许10%的差异
+            {
+                // 如果字体大小差异很大，几乎不可能是同一段落
+                // 但也要考虑标题和正文第一行的情况，那个应该由行间距主导
+                // return false; // 如果严格要求字号接近，取消此注释
+            }
+
+
+            // 垂直间距检查
+            float prevLineBottom = prevLineInParagraph.ApproximateBoundingBox.GetBottom();
+            float currentLineTop = currentLineToTest.ApproximateBoundingBox.GetTop();
+            float verticalDistance = prevLineBottom - currentLineTop; // Y轴向上，bottom Y < top Y，所以这个值应该是负的或接近0
+
+            // 或者，使用基线的Y坐标来计算行间距，这通常更准确
+            // float verticalDistance = prevLineInParagraph.StartPoint.Get(Vector.I2) - currentLineToTest.StartPoint.Get(Vector.I2);
+            // 注意：这个距离是基线间的距离，需要和行高比较
+
             float prevLineHeight = prevLineInParagraph.ApproximateBoundingBox.GetHeight();
-            if (prevLineHeight <= 0) prevLineHeight = prevLineInParagraph.FontSize * 1.2f;
-            if (verticalDistance <= prevLineHeight * 0.1f || verticalDistance > prevLineHeight * PARAGRAPH_LINE_SPACING_FACTOR)
+            if (prevLineHeight <= 0) prevLineHeight = prevLineInParagraph.FontSize * 1.2f; // 估算行高
+
+            // 行间距必须是正的（上一行的基线在当前行基线之上）且不能过大
+            // 使用你之前定义的 PARAGRAPH_LINE_SPACING_FACTOR，但确保其值合理
+            if (verticalDistance <= prevLineHeight * 0.1f || // 行重叠过多或顺序反了 (基于基线计算时)
+                verticalDistance > prevLineHeight * RELAXED_PARAGRAPH_LINE_SPACING_FACTOR) // 行间距过大
             {
                 return false;
             }
 
+            // 水平对齐/缩进检查 (这是最复杂的部分)
             float xIndentTolerance = Math.Max(paragraphFirstLine.FontSize, currentLineToTest.FontSize) * PARAGRAPH_INDENT_TOLERANCE_FACTOR;
-            float firstLineX = paragraphFirstLine.StartPoint.Get(Vector.I1);
-            float currentLineX = currentLineToTest.StartPoint.Get(Vector.I1);
+
+            float firstLineX = paragraphFirstLine.ApproximateBoundingBox.GetLeft();
+            float prevLineX = prevLineInParagraph.ApproximateBoundingBox.GetLeft();
+            float currentLineX = currentLineToTest.ApproximateBoundingBox.GetLeft();
+
+            // 条件1: 当前行与段首行几乎左对齐
             bool alignedWithFirst = Math.Abs(currentLineX - firstLineX) < xIndentTolerance;
-            bool alignedWithPrev = true;
-            if (paragraphFirstLine != prevLineInParagraph)
-            {
-                alignedWithPrev = Math.Abs(prevLineInParagraph.StartPoint.Get(Vector.I1) - currentLineX) < xIndentTolerance;
-            }
 
-            float pageWidthApproximation = GetPageWidth(prevLineInParagraph.PageNum);
-            bool prevLineIsSubstantiallyFull = (prevLineInParagraph.ApproximateBoundingBox.GetRight() - prevLineInParagraph.ApproximateBoundingBox.GetLeft()) > (pageWidthApproximation * 0.70);
+            // 条件2: 当前行与上一行几乎左对齐 (用于段落内非首行的对齐)
+            bool alignedWithPrev = Math.Abs(currentLineX - prevLineX) < xIndentTolerance;
 
-            if (prevLineIsSubstantiallyFull)
+            // 条件3: 当前行是悬挂缩进 (比首行缩进，但可能和上一行X不同，但上一行必须接近行尾)
+            // 并且 currentLineX 比 firstLineX 小 (悬挂)
+            float hangingIndentTolerance = Math.Max(paragraphFirstLine.FontSize, currentLineToTest.FontSize) * PARAGRAPH_HANGING_INDENT_TOLERANCE_FACTOR;
+            bool isHangingIndentCandidate = currentLineX < firstLineX - xIndentTolerance && // 当前行比首行明显靠左 (悬挂)
+                                            Math.Abs(currentLineX - prevLineX) > xIndentTolerance; // 且和上一行不对齐
+
+            // 获取页面/列宽度估算 (这个 GetPageWidth 可能需要改进为获取列宽)
+            float pageWidthApproximation = GetPageWidth(prevLineInParagraph.PageNum); // 你原来的方法
+                                                                                      // 或者用一个固定的估算值 float columnWidthApproximation = 300f; // 假设平均列宽
+
+            // 上一行是否接近行尾 (行宽的百分比)
+            bool prevLineEndsNearMargin = (prevLineInParagraph.ApproximateBoundingBox.GetRight() > firstLineX + pageWidthApproximation * 0.65);
+            // 或者, 上一行文本长度接近某个阈值 (假设平均每行字符数)
+            // bool prevLineIsLongEnough = prevLineInParagraph.Text.Length > 50;
+
+
+            // 决策逻辑:
+            // 1. 如果上一行已接近边距（或足够长），则下一行可以有一定程度的缩进变化（包括正常的换行或悬挂缩进的开始）
+            if (prevLineEndsNearMargin)
             {
-                if (currentLineX < firstLineX - xIndentTolerance * 2) return false;
-                return true;
-            }
-            else
-            {
-                if (!alignedWithFirst && !alignedWithPrev)
+                // 如果下一行与首行对齐，或者与上一行对齐（允许小的浮动），或者是合理的悬挂缩进开始
+                // 允许 currentLineX 比 firstLineX 稍大 (普通缩进) 或稍小 (悬挂缩进的开始)
+                // 主要检查 currentLineX 不会太靠右（新段落的典型特征）
+                if (currentLineX > firstLineX + hangingIndentTolerance * 2 && currentLineX > prevLineX + hangingIndentTolerance * 2)
                 {
-                    if (prevLineInParagraph.Text.Length < pageWidthApproximation * 0.3f && currentLineToTest.Text.Length > prevLineInParagraph.Text.Length * 1.5)
-                    {
-                        if (!alignedWithFirst && !alignedWithPrev) return false;
-                    }
-                    else if (!alignedWithFirst && !alignedWithPrev)
-                    {
-                        return false;
-                    }
+                    // 如果当前行X比首行和上一行都大幅度靠右，可能是新段落了
+                    return false;
                 }
+                return true; // 上一行很长，下一行很可能是接续
             }
-            return true;
+            else // 上一行较短 (未填满)
+            {
+                // 如果上一行很短就结束了，那么下一行必须严格与段首行对齐，或者与上一行对齐
+                // 不允许在这种情况下出现新的、与首行和上一行都不同的缩进
+                if (alignedWithFirst || alignedWithPrev)
+                {
+                    return true;
+                }
+                // 特例：如果 prevLine 很短，currentLine 也很短，但它们 X 对齐且 Y 连续，也可能是列表项等
+                // 但这个逻辑容易误判，暂时保守处理
+
+                return false; // 上一行短，当前行又不对齐，认为是新段落
+            }
         }
 
         private float GetPageWidth(int pageNum) // 简化 GetPageWidth
         {
-            var elementsOnPage = _elements.Where(e => e.PageNum == pageNum); // 使用成员变量 _elements
+            var elementsOnPage = _elements.Where(
+                e => e.PageNum == pageNum && 
+                e.ApproximateBoundingBox != null && 
+                e.ApproximateBoundingBox.GetWidth() > 0)
+                .ToList(); // 使用成员变量 _elements
             if (!elementsOnPage.Any()) return 600; // Default
             try
             {
@@ -463,7 +594,7 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
                 if (i < lines.Count - 1)
                 {
                     combinedTextBuilder.Append(Environment.NewLine); // 使用 Environment.NewLine 来获得平台相关的换行符
-                }
+                }   
             }
             string combinedText = combinedTextBuilder.ToString();
             // --- 文本连接逻辑结束 ---

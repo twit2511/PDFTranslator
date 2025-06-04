@@ -319,7 +319,7 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
                 fontNameToLog = "Font object exists, but name unavailable";
             }
 
-            Console.WriteLine($"\nDEBUG: Page {text.PageNum}, Text: '{textString.Substring(0, Math.Min(20, textString.Length))}', " +
+            Console.WriteLine($"\nDEBUG: Page {text.PageNum}, Text: /*{textString.Substring(0, textString.Length)}*/, " +
                               $"Font Chosen: '{fontNameToLog}', " +
                               $"FontSize: {text.FontSize}, " +
                               $"FontColor: {text.FontColor},"+
