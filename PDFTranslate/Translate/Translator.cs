@@ -1,4 +1,3 @@
-using PDFTranslate.Interfaces;
 using System;
 using System.Net;
 using System.Threading;
