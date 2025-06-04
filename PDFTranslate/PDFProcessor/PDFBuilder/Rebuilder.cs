@@ -19,6 +19,9 @@ using System.Windows.Media;
 using iText.Kernel.Pdf.Xobject;
 using iText.IO.Image;
 using System.Reflection;
+using System.Text;
+
+
 
 namespace PDFTranslate.PDFProcessor.PDFBuilder
 {
@@ -111,6 +114,15 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
                 {
                     return true;
                 }
+                if (c >= 0x3400 && c <= 0x4DBF) // CJK扩展A
+                {
+                    return true;
+                }
+                if (c >= 0x20000 && c <= 0x2A6DF) // CJK扩展B
+                {
+                    return true;
+                }
+
                 // 可以添加更多CJK相关范围的检查，如扩展区等
             }
             return false;
@@ -247,7 +259,7 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
                                     DrawTextElement(canvas, (TextElement)element);
                                     break;
                                 case PDFElementType.Image:
-                                    DrawImageElement(canvas, (ImageElement)element);
+                                    DrawImageElement(canvas, (ImageElement)element,newPage);
                                     break;
                                 case PDFElementType.PathLine:       
                                     DrawLineElement(canvas,(LineElement)element); 
@@ -316,21 +328,164 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
                               $"HorizScaling: {text.HorizontalScaling}");
             // ---- END DEBUG LOGGING ----
 
-            
-            
+            float textBoxWidth = text.ApproximateBoundingBox?.GetWidth() ?? float.MaxValue;
+            float textBoxHeight = text.ApproximateBoundingBox?.GetHeight() ?? float.MaxValue;
 
+            // 尝试用原始字体大小绘制
+            bool success = TryDrawText(canvas, text, textString, font, textBoxWidth, textBoxHeight, text.FontSize);
+
+            // 如果原始大小绘制失败，逐步缩小字体
+            if (!success)
+            {
+                float minFontSize = 2f; // 最小允许的字体大小
+                float step = 0.5f;      // 每次缩小的步长
+
+                for (float fontSize = text.FontSize - step; fontSize >= minFontSize; fontSize -= step)
+                {
+                    if (TryDrawText(canvas, text, textString, font, textBoxWidth, textBoxHeight, fontSize))
+                    {
+                        Console.WriteLine($"文本自动缩小到 {fontSize}pt 以适应空间");
+                        break;
+                    }
+                }
+            }
+
+        }
+
+        //辅助实现DrawTextElement函数
+        private static bool TryDrawText(PdfCanvas canvas, TextElement text, string textString,
+    PdfFont font, float maxWidth, float maxHeight, float fontSize)
+        {
+            // 计算单行文本宽度
+            float textWidth = font.GetWidth(textString, fontSize);
+
+            // 如果是单行文本且不超宽
+            if (textWidth <= maxWidth)
+            {
+                DrawSingleLineText(canvas, text, textString, font, fontSize);
+                return true;
+            }
+
+            // 多行文本处理
+            return TryDrawMultiLineText(canvas, text, textString, font, maxWidth, maxHeight, fontSize);
+        }
+
+        private static void DrawSingleLineText(PdfCanvas canvas, TextElement text, string textString,
+    PdfFont font, float fontSize)
+        {
+            DrawTextLine(canvas, text, textString, font, fontSize,
+                text.StartPoint.Get(iText.Kernel.Geom.Vector.I1), text.StartPoint.Get(iText.Kernel.Geom.Vector.I2));
+        }
+
+        
+        private static bool TryDrawMultiLineText(PdfCanvas canvas, TextElement text, string textString,
+    PdfFont font, float maxWidth, float maxHeight, float fontSize)
+        {
+            float lineHeight = font.GetAscent(" ", fontSize) - font.GetDescent(" ", fontSize);
+            int maxLines = (int)(maxHeight / lineHeight);
+
+            List<string> lines = new List<string>();
+
+            // 中文换行逻辑
+            if (ContainsCjkCharacters(textString))
+            {
+                StringBuilder currentLine = new StringBuilder();
+                float currentWidth = 0;
+
+                foreach (char c in textString)
+                {
+                    float charWidth = font.GetWidth(c.ToString(), fontSize);
+
+                    if (currentWidth + charWidth > maxWidth)
+                    {
+                        lines.Add(currentLine.ToString());
+                        currentLine.Clear();
+                        currentWidth = 0;
+
+                        if (lines.Count >= maxLines) break;
+                    }
+
+                    currentLine.Append(c);
+                    currentWidth += charWidth;
+                }
+
+                if (currentLine.Length > 0 && lines.Count < maxLines)
+                {
+                    lines.Add(currentLine.ToString());
+                }
+            }
+            // 西文换行逻辑
+            else
+            {
+                string[] words = textString.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                StringBuilder currentLine = new StringBuilder();
+                float currentWidth = 0;
+
+                foreach (string word in words)
+                {
+                    float wordWidth = font.GetWidth(word, fontSize);
+                    float spaceWidth = font.GetWidth(" ", fontSize);
+
+                    if (currentLine.Length > 0 && currentWidth + spaceWidth + wordWidth > maxWidth)
+                    {
+                        lines.Add(currentLine.ToString());
+                        currentLine.Clear();
+                        currentWidth = 0;
+
+                        if (lines.Count >= maxLines) break;
+                    }
+
+                    if (currentLine.Length > 0)
+                    {
+                        currentLine.Append(" ");
+                        currentWidth += spaceWidth;
+                    }
+
+                    currentLine.Append(word);
+                    currentWidth += wordWidth;
+                }
+
+                if (currentLine.Length > 0 && lines.Count < maxLines)
+                {
+                    lines.Add(currentLine.ToString());
+                }
+            }
+
+            // 检查是否所有内容都能放下
+            if (lines.Count <= maxLines)
+            {
+                float currentY = text.StartPoint.Get(iText.Kernel.Geom.Vector.I2);
+                foreach (string line in lines)
+                {
+                    DrawTextLine(canvas, text, line, font, fontSize, text.StartPoint.Get(iText.Kernel.Geom.Vector.I1), currentY);
+                    currentY -= lineHeight * 1.2f;
+                }
+                return true;
+            }
+
+            return false;
+        }
+
+        //最终写入
+        private static void DrawTextLine(PdfCanvas canvas, TextElement text, string textString,
+    PdfFont font, float fontSize, float x, float y)
+        {
             canvas.BeginText()
-                .SetFontAndSize(font, text.FontSize)
+                .SetFontAndSize(font, fontSize)
                 .SetFillColor(text.FontColor ?? ColorConstants.BLACK)
                 .SetCharacterSpacing(text.CharacterSpacing)
                 .SetWordSpacing(text.WordSpacing)
                 .SetHorizontalScaling(text.HorizontalScaling)
-                .MoveText(text.StartPoint.Get(iText.Kernel.Geom.Vector.I1), text.StartPoint.Get(iText.Kernel.Geom.Vector.I2))
+                .MoveText(x, y)
                 .ShowText(textString)
                 .EndText();
-
         }
-        private static void DrawImageElement(PdfCanvas canvas, ImageElement imageElement)
+
+
+
+
+
+        private static void DrawImageElement(PdfCanvas canvas, ImageElement imageElement, PdfPage newPage)
         {
             if (imageElement.ImageObject == null || imageElement.Matrix == null)
             {
@@ -340,85 +495,140 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
 
             PdfImageXObject originalImageXObject = imageElement.ImageObject;
             iText.Kernel.Geom.Matrix matrix = imageElement.Matrix;
-            PdfDocument newDocument = canvas.GetDocument();
+            PdfDocument newDocument = newPage.GetDocument(); // 正确获取目标文档
 
+            Console.WriteLine($"    DEBUG: Processing ImageElement on Page {imageElement.PageNum}. Original XObject ID: {originalImageXObject?.GetPdfObject()?.GetIndirectReference()}");
+
+            // 方案1: 尝试使用 GetImageBytes(true) 来获取可能已部分解码的数据
             try
             {
-                
+                Console.WriteLine("    DEBUG: Attempting originalImageXObject.GetImageBytes(true)");
+                // true 参数提示 iText 尝试解码流中的数据
+                byte[] decodedImageBytes = originalImageXObject.GetImageBytes(true);
 
-                byte[] imageBytes = null;
-                PdfStream imageStream = originalImageXObject.GetPdfObject(); // PdfImageXObject 本身就是一个 PdfStream
-
-                if (imageStream != null)
+                if (decodedImageBytes != null && decodedImageBytes.Length > 0)
                 {
-                    // 尝试获取原始（可能已压缩）的字节
-                    // 注意：对于某些复杂的图像，这可能不是直接的图像文件格式字节
-                    imageBytes = imageStream.GetBytes(false); // false 表示不解码，获取原始流字节
-                }
+                    Console.WriteLine($"    DEBUG: GetImageBytes(true) returned {decodedImageBytes.Length} bytes. Attempting ImageDataFactory.Create.");
+                    ImageData imageData = null;
+                    try
+                    {
+                        imageData = ImageDataFactory.Create(decodedImageBytes);
+                        // 注意：即使 GetImageBytes(true) 成功，ImageDataFactory 仍可能失败，
+                        // 因为它还需要从图像字典中推断出宽度、高度、颜色空间等。
+                        // GetImageBytes(true) 主要关注数据流的解码，而不是元数据的完整解析。
+                    }
+                    catch (Exception exFactoryFromDecoded)
+                    {
+                        Console.WriteLine($"    DEBUG: ImageDataFactory.Create failed with bytes from GetImageBytes(true): {exFactoryFromDecoded.Message}.");
+                        // imageData 会是 null
+                    }
 
-                if (imageBytes == null || imageBytes.Length == 0)
-                {
-                    Console.WriteLine($"    警告: 无法从 PdfImageXObject (页 {imageElement.PageNum}) 获取原始图像字节。尝试使用 CopyTo。");
-                    // 回退到 CopyTo 方案
-                    UseCopyToForImage(canvas, originalImageXObject, matrix);
-                    return;
-                }
-
-                ImageData imageData = null;
-                try
-                {
-                    imageData = ImageDataFactory.Create(imageBytes);
-                }
-                catch (Exception exFactory)
-                {
-                    Console.WriteLine($"    警告: 使用 ImageDataFactory 从提取的字节创建图像失败 (页 {imageElement.PageNum}): {exFactory.Message}。尝试使用 CopyTo。");
-                    // 如果 ImageDataFactory 失败 (例如，字节不是它能识别的格式)，回退到 CopyTo
-                    UseCopyToForImage(canvas, originalImageXObject, matrix);
-                    return;
-                }
-
-                // 创建一个 iText.Layout.Element.Image 对象
-                // 这个 Image 对象将负责将其 XObject 正确地添加到新文档中
-                Image layoutImage = new Image(imageData);
-
-                // 获取属于新文档的 PdfXObject
-                // 当我们通过 iText.Layout.Element.Image 创建 XObject 时，它会自动属于正确的文档
-                PdfImageXObject newPdfImageXObject = new PdfImageXObject(imageData);
-
-                if (newPdfImageXObject != null)
-                {
-                    Console.WriteLine($"    信息: 通过 ImageDataFactory 重新创建图像成功 (页 {imageElement.PageNum})。");
-                    canvas.AddXObjectWithTransformationMatrix(
-                        newPdfImageXObject,
-                        matrix.Get(iText.Kernel.Geom.Matrix.I11), // a
-                        matrix.Get(iText.Kernel.Geom.Matrix.I12), // b
-                        matrix.Get(iText.Kernel.Geom.Matrix.I21), // c
-                        matrix.Get(iText.Kernel.Geom.Matrix.I22), // d
-                        matrix.Get(iText.Kernel.Geom.Matrix.I31), // e
-                        matrix.Get(iText.Kernel.Geom.Matrix.I32)  // f
-                    );
+                    if (imageData != null)
+                    {
+                        Console.WriteLine("    DEBUG: ImageDataFactory.Create successful with decoded bytes. Creating layout Image.");
+                        Image layoutImage = new Image(imageData);
+                        PdfImageXObject newPdfImageXObject = (PdfImageXObject)layoutImage.GetXObject();
+                        if (newPdfImageXObject != null)
+                        {
+                            Console.WriteLine("    DEBUG: Successfully created new XObject via GetImageBytes(true) and ImageDataFactory. Adding to canvas.");
+                            canvas.AddXObjectWithTransformationMatrix(
+                                newPdfImageXObject,
+                                matrix.Get(iText.Kernel.Geom.Matrix.I11), matrix.Get(iText.Kernel.Geom.Matrix.I12),
+                                matrix.Get(iText.Kernel.Geom.Matrix.I21), matrix.Get(iText.Kernel.Geom.Matrix.I22),
+                                matrix.Get(iText.Kernel.Geom.Matrix.I31), matrix.Get(iText.Kernel.Geom.Matrix.I32)
+                            );
+                            return; // 成功处理
+                        }
+                        else
+                        {
+                            Console.WriteLine("    DEBUG: layoutImage.GetXObject() returned null");
+                        }
+                    }
                 }
                 else
                 {
-                    Console.WriteLine($"    警告: 从 ImageData 创建的 Layout.Image 未能生成 PdfXObject (页 {imageElement.PageNum})。尝试使用 CopyTo。");
-                    UseCopyToForImage(canvas, originalImageXObject, matrix);
+                    Console.WriteLine("    DEBUG: GetImageBytes(true) returned null or empty byte array.");
                 }
             }
-            catch (Exception ex)
+            catch (Exception exGetImageBytesTrue)
             {
-                Console.WriteLine($"    错误: 从原始数据重新创建图像时发生意外错误 (页 {imageElement.PageNum}): {ex.Message}。尝试使用 CopyTo 作为最终回退。");
-                try
+                // GetImageBytes(true) 本身也可能因为无法处理特定滤镜而抛出异常
+                Console.WriteLine($"    DEBUG: originalImageXObject.GetImageBytes(true) threw an exception: {exGetImageBytesTrue.Message}");
+            }
+
+            // 方案2: 回退到使用原始流字节 (GetBytes(false)) - 这是你之前的逻辑
+            // (可以保留这个分支，或者如果上面的尝试已经足够，可以直接跳到CopyTo)
+            try
+            {
+                Console.WriteLine("    DEBUG: Attempting originalImageXObject.GetPdfObject().GetBytes(false) (original stream bytes)");
+                byte[] originalStreamBytes = originalImageXObject.GetPdfObject().GetBytes(false); // 获取未解码的原始流
+
+                if (originalStreamBytes != null && originalStreamBytes.Length > 0)
                 {
-                    UseCopyToForImage(canvas, originalImageXObject, matrix);
+                    Console.WriteLine($"    DEBUG: GetBytes(false) returned {originalStreamBytes.Length} bytes. Attempting ImageDataFactory.Create.");
+                    ImageData imageData = null;
+                    try
+                    {
+                        imageData = ImageDataFactory.Create(originalStreamBytes);
+                    }
+                    catch (Exception exFactoryOriginal)
+                    {
+                        Console.WriteLine($"    DEBUG: ImageDataFactory.Create failed with original stream bytes: {exFactoryOriginal.Message}.");
+                    }
+
+                    if (imageData != null)
+                    {
+                        Console.WriteLine("    DEBUG: ImageDataFactory.Create successful with original stream bytes. Creating layout Image.");
+                        Image layoutImage = new Image(imageData);
+                        PdfImageXObject newPdfImageXObject = (PdfImageXObject)layoutImage.GetXObject();
+                        if (newPdfImageXObject != null)
+                        {
+                            Console.WriteLine("    DEBUG: Successfully created new XObject via original stream and ImageDataFactory. Adding to canvas.");
+                            canvas.AddXObjectWithTransformationMatrix(
+                                newPdfImageXObject,
+                                matrix.Get(iText.Kernel.Geom.Matrix.I11), matrix.Get(iText.Kernel.Geom.Matrix.I12),
+                                matrix.Get(iText.Kernel.Geom.Matrix.I21), matrix.Get(iText.Kernel.Geom.Matrix.I22),
+                                matrix.Get(iText.Kernel.Geom.Matrix.I31), matrix.Get(iText.Kernel.Geom.Matrix.I32)
+                            );
+                            return; // 成功处理
+                        }
+                        else
+                        {
+                            Console.WriteLine("    DEBUG: layoutImage.GetXObject() returned null after original stream.");
+                        }
+                    }
                 }
-                catch (Exception exCopyToFallback)
+                else
                 {
-                    Console.WriteLine($"    严重错误: 最终回退到 CopyTo 方案也失败了 (页 {imageElement.PageNum}): {exCopyToFallback.Message}");
+                    Console.WriteLine("    DEBUG: GetBytes(false) returned null or empty byte array.");
                 }
+            }
+            catch (Exception exGetBytesFalse)
+            {
+                Console.WriteLine($"    DEBUG: originalImageXObject.GetPdfObject().GetBytes(false) threw an exception: {exGetBytesFalse.Message}");
+            }
+
+
+            // 方案3: 如果以上所有通过 ImageDataFactory 的尝试都失败，最终回退到 CopyTo
+            Console.WriteLine("    DEBUG: All ImageDataFactory attempts failed or were inconclusive. Falling back to CopyTo.");
+            try
+            {
+                UseCopyToForImage(canvas, originalImageXObject, matrix);
+            }
+            catch (Exception exCopyTo)
+            {
+                // 如果 CopyTo 也失败了，特别是抛出 "Pdf indirect object belongs to other PDF document"
+                // 那么问题就比较棘手了。
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"    !!!!!! FATAL ERROR: UseCopyToForImage also failed for XObject  !!!!!!");
+                Console.WriteLine($"           Exception: {exCopyTo.Message}");
+                Console.ResetColor();
+                // 这里可以选择抛出异常，或者记录并跳过这个图像，以尝试完成文档的其余部分
+                // throw; // 如果希望程序因这个图像失败而停止
             }
         }
 
-        // 辅助方法，用于原始的 CopyTo 逻辑
+        // 辅助方法，用于 CopyTo 逻辑
         private static void UseCopyToForImage(PdfCanvas canvas, PdfImageXObject imageXObject, iText.Kernel.Geom.Matrix matrix)
         {
             Console.WriteLine($"    信息: 正在尝试使用 CopyTo 绘制图像 (页 {imageXObject.GetPdfObject().GetIndirectReference()?.GetDocument().GetPageNumber(imageXObject.GetPdfObject())})"); // 尝试获取原始页码
@@ -438,11 +648,18 @@ namespace PDFTranslate.PDFProcessor.PDFBuilder
 
         private static void DrawLineElement(PdfCanvas canvas, LineElement line) {
 
+            if (line == null && line.StartPoint == null && line.EndPoint == null) {
+                Console.WriteLine($"没有完整的LineElement数据！");
+                return;
+            }
+            
             canvas.SetStrokeColor(line.StrokeColor ?? ColorConstants.BLACK)
                 .SetLineWidth(line.LineWidth > 0 ? line.LineWidth : 0.5f)
                 .MoveTo(line.StartPoint.Get(iText.Kernel.Geom.Vector.I1), line.StartPoint.Get(iText.Kernel.Geom.Vector.I2))
                 .LineTo(line.EndPoint.Get(iText.Kernel.Geom.Vector.I1), line.EndPoint.Get(iText.Kernel.Geom.Vector.I2))
                 .Stroke();
+
+            Console.WriteLine($"表格框架绘制完成");
         }
     }
 }
