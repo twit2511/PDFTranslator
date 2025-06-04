@@ -1,4 +1,4 @@
-﻿using PDFTranslate.Interfaces;
+using PDFTranslate.Interfaces;
 using System;
 using System.Net;
 using System.Threading;
@@ -10,7 +10,7 @@ using TencentCloud.Tmt.V20180321.Models;
 // ----------------------------------
 
 
-namespace PDFTranslate.translators
+namespace PDFTranslate.Translate
 {
     public class Translator : ITranslator
     {

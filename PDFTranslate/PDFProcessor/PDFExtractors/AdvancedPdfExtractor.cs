@@ -5,6 +5,9 @@ using System.Linq;
 using PDFTranslate.PDFProcessor.PDFElements;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas.Parser;
+using iText.Kernel.Crypto.Securityhandler;
+using iText.Bouncycastle.Crypto;
+using PDFTranslate.Translate;
 
 namespace PDFTranslate.PDFProcessor.PDFExtractors
 {
@@ -65,6 +68,23 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
             }
 
             Console.WriteLine($"\n提取与分析完成。共处理 {allElements.Count} 个元素。");
+
+            Console.WriteLine($"开始翻译...");
+
+            ITranslator translator = new Translator();
+            foreach (var element in allElements)
+            {
+                if (element is TextElement textElement)
+                {
+                    break;
+                    if (textElement.NeedsTranslated)
+                    {
+                        textElement.TranslatedText =  translator.TranslateAsync(textElement.Text, "en", "zh");
+                        Console.WriteLine($"    第 {textElement.PageNum} 页：翻译文本 \"{textElement.Text}\" 为 \"{textElement.TranslatedText}\"。");
+                    }
+                }
+            }
+            Console.WriteLine($"翻译完成。");
 
             return allElements;
 

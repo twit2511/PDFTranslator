@@ -23,10 +23,10 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
 
         // 定义已知数学字体名称的子串 (用于启发式判断公式)
         private static readonly HashSet<string> MathFontNameSubstrings = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "Math", "Symbol", "MT Extra", "Euclid", "Mathematical", "CambriaMath", "CMSY", "CMEX", "AMS"
-        // 可根据需要扩展此列表
-    };
+        {
+            "Math", "Symbol", "MT Extra", "Euclid", "Mathematical", "CambriaMath", "CMSY", "CMEX", "AMS"
+            // 可根据需要扩展此列表
+        };
 
         // 检查文本是否包含常用 Unicode 数学符号 (用于启发式判断公式)
         private static bool ContainsMathChars(string text)
@@ -44,6 +44,16 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
         // 路径处理常量
         private const float MIN_LINE_LENGTH = 5.0f; // 忽略过短的线条
         private const float LINE_DETECTION_TOLERANCE = 1.5f; // 水平/垂直判断容差
+
+        // --- 新增/调整：文本合并相关的常量 ---
+        private const float INTRA_LINE_Y_TOLERANCE_FACTOR = 0.5f;
+        private const float INTRA_LINE_X_SPACE_FACTOR_MAX = 2.0f;
+        private const float INTRA_LINE_X_SPACE_FACTOR_MIN = 0.1f;
+        private const float INTRA_LINE_X_OVERLAP_TOLERANCE = 2.0f;
+        private const float PARAGRAPH_LINE_SPACING_FACTOR = 2.2f;
+        private const float PARAGRAPH_INDENT_TOLERANCE_FACTOR = 0.8f;
+        private const float STYLE_CHANGE_TOLERANCE_FONTSIZE = 0.5f; // 用于AreChunksMergeableForLine, 段落内可略宽松
+        private const float STYLE_CHANGE_TOLERANCE_HSCALE = 0.05f; // 水平缩放比例变化容差(行内)，段落内可略宽松
 
         public PdfElementExtractionListener(int pageNumber)
         {
@@ -95,10 +105,10 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
             var ascentLine = renderInfo.GetAscentLine();
             var descentLine = renderInfo.GetDescentLine();
             float height = ascentLine.GetStartPoint().Get(Vector.I2) - descentLine.GetStartPoint().Get(Vector.I2);
-            if (height <= 0 && renderInfo.GetFontSize() > 0) 
+            if (height <= 0 && renderInfo.GetFontSize() > 0)
                 height = renderInfo.GetFontSize() * 1.2f; // 估算高度
             float width = endPoint.Get(Vector.I1) - startPoint.Get(Vector.I1);
-            if (Math.Abs(width) < 0.01f && text.Length > 0) 
+            if (Math.Abs(width) < 0.01f && text.Length > 0)
                 width = renderInfo.GetFontSize() * text.Length * 0.6f; // 估算宽度
             Rectangle bbox = new Rectangle(startPoint.Get(Vector.I1), descentLine.GetStartPoint().Get(Vector.I2), width, height);
 
@@ -127,7 +137,8 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
                 WordSpacing = renderInfo.GetWordSpacing(),
                 HorizontalScaling = renderInfo.GetHorizontalScaling(),
                 OriginalFont = font,
-                ElementType = elementType // 设置初步判断的类型
+                ElementType = elementType, // 设置初步判断的类型
+                NeedsTranslated = true // 默认需要翻译，后续可能会调整
             };
             _elements.Add(textElement);
         }
@@ -196,191 +207,348 @@ namespace PDFTranslate.PDFProcessor.PDFExtractors
             }
         }
 
-        public List<IPDFElement> GetAndMergeExtractedElements()
-        {
-            // _elements 包含了原始提取的所有 IPdfElement
-            List<IPDFElement> mergedElements = new List<IPDFElement>();
-            List<TextElement> currentLineTextChunks = new List<TextElement>();
-
-            // 先按页码，再按 Y 坐标（大致行），再按 X 坐标排序，有助于处理
-            // 注意：这里用 ApproximateBoundingBox.GetY()，更精确的是 StartPoint.Get(Vector.I2)
-            var sortedElements = _elements
-                .OrderBy(e => e.PageNum)
-                .ThenByDescending(e => e.ApproximateBoundingBox.GetY()) // PDF Y轴向上，所以同一行Y值大的在上面
-                .ThenBy(e => e.ApproximateBoundingBox.GetX())
-                .ToList();
-
-            IPDFElement lastElement = null;
-
-            foreach (var element in sortedElements)
-            {
-                if (element is TextElement currentText)
-                {
-                    if (currentLineTextChunks.Count == 0)
-                    {
-                        currentLineTextChunks.Add(currentText);
-                    }
-                    else
-                    {
-                        TextElement prevText = currentLineTextChunks.Last();
-                        // --- 合并条件检查 ---
-                        if (AreChunksMergeable(prevText, currentText))
-                        {
-                            currentLineTextChunks.Add(currentText);
-                        }
-                        else
-                        {
-                            // 不能合并，先处理之前收集的行内块
-                            if (currentLineTextChunks.Any())
-                            {
-                                mergedElements.Add(CombineTextChunks(currentLineTextChunks));
-                                currentLineTextChunks.Clear();
-                            }
-                            currentLineTextChunks.Add(currentText); // 开始新的收集
-                        }
-                    }
-                }
-                else // 非文本元素 (Image, Line)
-                {
-                    // 先处理之前收集的行内文本块
-                    if (currentLineTextChunks.Any())
-                    {
-                        mergedElements.Add(CombineTextChunks(currentLineTextChunks));
-                        currentLineTextChunks.Clear();
-                    }
-                    mergedElements.Add(element); // 直接添加非文本元素
-                }
-                lastElement = element;
-            }
-
-            // 处理最后一批收集的文本块
-            if (currentLineTextChunks.Any())
-            {
-                mergedElements.Add(CombineTextChunks(currentLineTextChunks));
-            }
-
-            return mergedElements;
-        }
-
-        // 辅助方法：判断两个文本块是否可以合并
+        // --- 文本合并逻辑 ---
+        // 这个方法是你之前提供的，用于行内合并
         private bool AreChunksMergeable(TextElement prev, TextElement current, float yTolerance = 2.0f, float xToleranceFactor = 1.5f)
         {
             if (prev == null || current == null) return false;
-
-            // 1. 必须在同一页
             if (prev.PageNum != current.PageNum) return false;
-
-            // 2. 字体、字号、颜色、水平缩放必须基本一致
             if (prev.FontName != current.FontName ||
-                Math.Abs(prev.FontSize - current.FontSize) > 0.1f || // 允许极小字体差异
+                Math.Abs(prev.FontSize - current.FontSize) > STYLE_CHANGE_TOLERANCE_FONTSIZE || // 使用常量
                 !AreColorsSimilar(prev.FontColor, current.FontColor) ||
-                Math.Abs(prev.HorizontalScaling - current.HorizontalScaling) > 0.1f) // 水平缩放也要一致
+                Math.Abs(prev.HorizontalScaling - current.HorizontalScaling) > STYLE_CHANGE_TOLERANCE_HSCALE) // 使用常量
             {
                 return false;
             }
-
-            // 3. Y 坐标 (基线) 必须非常接近 (同一行)
-            // 使用 StartPoint 的 Y 值进行比较
             float prevY = prev.StartPoint.Get(Vector.I2);
             float currentY = current.StartPoint.Get(Vector.I2);
-            if (Math.Abs(prevY - currentY) > yTolerance)
+            // Y容差应该与字号相关
+            float dynamicYTolerance = Math.Max(prev.FontSize, current.FontSize) * INTRA_LINE_Y_TOLERANCE_FACTOR;
+            if (Math.Abs(prevY - currentY) > dynamicYTolerance) // 使用动态容差
             {
                 return false;
             }
-
-            // 4. X 坐标必须大致连续
-            // prev 的结束点 X 应该接近 current 的起始点 X
             float prevEndX = prev.EndPoint.Get(Vector.I1);
             float currentStartX = current.StartPoint.Get(Vector.I1);
+            float avgCharWidthPrev = prev.Text.Length > 0 ? (prev.EndPoint.Get(Vector.I1) - prev.StartPoint.Get(Vector.I1)) / prev.Text.Length : prev.FontSize * 0.5f;
+            float maxSpace = avgCharWidthPrev * INTRA_LINE_X_SPACE_FACTOR_MAX; // 使用常量
+            float minOverlapOrGap = avgCharWidthPrev * INTRA_LINE_X_SPACE_FACTOR_MIN; // 允许的小间隙或重叠
 
-            // 计算预期间隙（基于前一个块的平均字符宽度或空格宽度）
-            float expectedSpace = prev.FontSize * 0.3f * xToleranceFactor; // 粗略估算空格宽度容差
-                                                                           // 或者使用 prev.CharacterSpacing, prev.WordSpacing (如果可靠)
-
-            if (currentStartX < prevEndX - expectedSpace || // current 在 prev 左边太多（重叠或顺序错）
-                currentStartX > prevEndX + expectedSpace * 3)    // current 在 prev 右边太远 (间隙过大)
+            if (currentStartX < prevEndX - INTRA_LINE_X_OVERLAP_TOLERANCE || // 使用常量允许重叠
+                currentStartX > prevEndX + maxSpace)
             {
-                return false;
-            }
-
-            return true;
-        }
-
-        // 辅助方法：判断颜色是否相似 (iText Color 没有直接的 Equals)
-        private bool AreColorsSimilar(Color c1, Color c2, float tolerance = 0.01f)
-        {
-            if (c1 == null && c2 == null) return true;
-            if (c1 == null || c2 == null) return false;
-
-            // 比较颜色分量 (假设是 RGB 或 CMYK，更复杂的颜色空间比较更麻烦)
-            var comp1 = c1.GetColorValue();
-            var comp2 = c2.GetColorValue();
-            if (comp1.Length != comp2.Length) return false;
-
-            for (int i = 0; i < comp1.Length; i++)
-            {
-                if (Math.Abs(comp1[i] - comp2[i]) > tolerance) return false;
+                // 进一步检查是否是紧密连接但被分割的块
+                if (!(currentStartX >= prevEndX - minOverlapOrGap && currentStartX <= prevEndX + minOverlapOrGap))
+                {
+                    return false;
+                }
             }
             return true;
         }
 
-
-        // 辅助方法：合并一组 TextElement 为一个
+        // 这个方法是你之前提供的，用于合并行内块
         private TextElement CombineTextChunks(List<TextElement> chunks)
         {
             if (chunks == null || !chunks.Any()) return null;
-            if (chunks.Count == 1) return chunks[0]; // 如果只有一个，直接返回
-
-            // 以第一个块为基础，合并文本内容
+            if (chunks.Count == 1) return chunks[0];
             TextElement firstChunk = chunks[0];
-            string combinedText = string.Join("", chunks.Select(c => c.Text));
-
-            // 计算合并后的边界框 (取所有块的最小外接矩形)
+            TextElement lastChunk = chunks.Last(); // 需要最后一个块来确定 EndPoint
+            // 行内合并，直接连接文本，因为它们在同一视觉行
+            string combinedText = string.Join(" ", chunks.Select(c => c.Text));
             float minX = chunks.Min(c => c.ApproximateBoundingBox.GetLeft());
             float minY = chunks.Min(c => c.ApproximateBoundingBox.GetBottom());
             float maxX = chunks.Max(c => c.ApproximateBoundingBox.GetRight());
             float maxY = chunks.Max(c => c.ApproximateBoundingBox.GetTop());
             Rectangle combinedBBox = new Rectangle(minX, minY, maxX - minX, maxY - minY);
-
-            // 合并后的 StartPoint 是第一个块的 StartPoint
-            // 合并后的 EndPoint 是最后一个块的 EndPoint
-            Vector combinedStartPoint = firstChunk.StartPoint;
-            Vector combinedEndPoint = chunks.Last().EndPoint;
-
-            // 其他属性（字体、大小、颜色等）在 AreChunksMergeable 中已确保一致，可直接取第一个的
             return new TextElement
             {
                 PageNum = firstChunk.PageNum,
                 Text = combinedText,
                 ApproximateBoundingBox = combinedBBox,
-                StartPoint = combinedStartPoint,
-                EndPoint = combinedEndPoint,
+                StartPoint = firstChunk.StartPoint,
+                EndPoint = lastChunk.EndPoint, // 正确的 EndPoint
                 FontName = firstChunk.FontName,
                 FontSize = firstChunk.FontSize,
                 FontColor = firstChunk.FontColor,
-                CharacterSpacing = firstChunk.CharacterSpacing, // 平均值或第一个？这里取第一个
-                WordSpacing = firstChunk.WordSpacing,         // 同上
-                HorizontalScaling = firstChunk.HorizontalScaling, // 同上
-                OriginalFont = firstChunk.OriginalFont,       // 同上
-                ElementType = firstChunk.ElementType // 合并后的类型通常与第一个块的初步判断一致，后续结构分析会再调整
+                CharacterSpacing = firstChunk.CharacterSpacing,
+                WordSpacing = firstChunk.WordSpacing,
+                HorizontalScaling = firstChunk.HorizontalScaling,
+                OriginalFont = firstChunk.OriginalFont,
+                ElementType = firstChunk.ElementType,
+                NeedsTranslated = firstChunk.NeedsTranslated,
             };
         }
 
-        /// <summary>
-        /// 声明此监听器关心的事件类型。
-        /// </summary>
+
+        // --- 新增的段落合并逻辑 ---
+        private List<TextElement> StitchTextElementsInLines(List<TextElement> rawTextElements)
+        {
+            // 这个方法就是你之前的 GetAndMergeExtractedElements 的核心逻辑，但只处理文本
+            if (rawTextElements == null || !rawTextElements.Any())
+            {
+                return new List<TextElement>();
+            }
+
+            var sortedChunks = rawTextElements
+                .OrderBy(t => t.PageNum) // 使用 PageNum
+                .ThenByDescending(t => t.StartPoint.Get(Vector.I2))
+                .ThenBy(t => t.StartPoint.Get(Vector.I1))
+                .ToList();
+
+            List<TextElement> stitchedLines = new List<TextElement>();
+            if (!sortedChunks.Any()) return stitchedLines;
+
+            List<TextElement> currentLineAssembly = new List<TextElement> { sortedChunks[0] };
+
+            for (int i = 1; i < sortedChunks.Count; i++)
+            {
+                TextElement prevChunk = currentLineAssembly.Last();
+                TextElement currentChunk = sortedChunks[i];
+
+                // 使用你定义的 AreChunksMergeable (它现在是行内合并逻辑)
+                if (AreChunksMergeable(prevChunk, currentChunk))
+                {
+                    currentLineAssembly.Add(currentChunk);
+                }
+                else
+                {
+                    if (currentLineAssembly.Any())
+                    {
+                        stitchedLines.Add(CombineTextChunks(currentLineAssembly)); // 使用你定义的 CombineTextChunks
+                    }
+                    currentLineAssembly.Clear();
+                    currentLineAssembly.Add(currentChunk);
+                }
+            }
+            if (currentLineAssembly.Any())
+            {
+                stitchedLines.Add(CombineTextChunks(currentLineAssembly));
+            }
+            return stitchedLines;
+        }
+
+        private List<TextElement> BuildParagraphsFromLines(List<TextElement> stitchedLines)
+        {
+            if (stitchedLines == null || !stitchedLines.Any())
+            {
+                return new List<TextElement>();
+            }
+
+            // stitchedLines 已经是按行排序（或至少是按Y粗略排序）的
+            List<TextElement> paragraphs = new List<TextElement>();
+            if (!stitchedLines.Any()) return paragraphs;
+
+            List<TextElement> currentParagraphAssembly = new List<TextElement> { stitchedLines[0] };
+
+            for (int i = 1; i < stitchedLines.Count; i++)
+            {
+                TextElement paragraphFirstLine = currentParagraphAssembly.First();
+                TextElement prevLineInAssembly = currentParagraphAssembly.Last();
+                TextElement currentLineToTest = stitchedLines[i];
+
+                if (AreLinesMergeableForParagraph(paragraphFirstLine, prevLineInAssembly, currentLineToTest))
+                {
+                    currentParagraphAssembly.Add(currentLineToTest);
+                }
+                else
+                {
+                    if (currentParagraphAssembly.Any())
+                    {
+                        paragraphs.Add(CombineParagraphLinesToSingleElement(currentParagraphAssembly));
+                    }
+                    currentParagraphAssembly.Clear();
+                    currentParagraphAssembly.Add(currentLineToTest);
+                }
+            }
+            if (currentParagraphAssembly.Any())
+            {
+                paragraphs.Add(CombineParagraphLinesToSingleElement(currentParagraphAssembly));
+            }
+            return paragraphs;
+        }
+
+        private bool AreLinesMergeableForParagraph(TextElement paragraphFirstLine, TextElement prevLineInParagraph, TextElement currentLineToTest)
+        {
+            if (prevLineInParagraph.PageNum != currentLineToTest.PageNum) return false;
+
+            if (paragraphFirstLine.FontName != currentLineToTest.FontName && prevLineInParagraph.FontName != currentLineToTest.FontName)
+            {
+                if (prevLineInParagraph.FontName != currentLineToTest.FontName) return false;
+            }
+            float fontSizeTolerance = Math.Max(paragraphFirstLine.FontSize, currentLineToTest.FontSize) * 0.2f;
+            if (Math.Abs(paragraphFirstLine.FontSize - currentLineToTest.FontSize) > fontSizeTolerance &&
+                Math.Abs(prevLineInParagraph.FontSize - currentLineToTest.FontSize) > STYLE_CHANGE_TOLERANCE_FONTSIZE)
+            {
+                return false;
+            }
+
+            float verticalDistance = prevLineInParagraph.StartPoint.Get(Vector.I2) - currentLineToTest.StartPoint.Get(Vector.I2);
+            float prevLineHeight = prevLineInParagraph.ApproximateBoundingBox.GetHeight();
+            if (prevLineHeight <= 0) prevLineHeight = prevLineInParagraph.FontSize * 1.2f;
+            if (verticalDistance <= prevLineHeight * 0.1f || verticalDistance > prevLineHeight * PARAGRAPH_LINE_SPACING_FACTOR)
+            {
+                return false;
+            }
+
+            float xIndentTolerance = Math.Max(paragraphFirstLine.FontSize, currentLineToTest.FontSize) * PARAGRAPH_INDENT_TOLERANCE_FACTOR;
+            float firstLineX = paragraphFirstLine.StartPoint.Get(Vector.I1);
+            float currentLineX = currentLineToTest.StartPoint.Get(Vector.I1);
+            bool alignedWithFirst = Math.Abs(currentLineX - firstLineX) < xIndentTolerance;
+            bool alignedWithPrev = true;
+            if (paragraphFirstLine != prevLineInParagraph)
+            {
+                alignedWithPrev = Math.Abs(prevLineInParagraph.StartPoint.Get(Vector.I1) - currentLineX) < xIndentTolerance;
+            }
+
+            float pageWidthApproximation = GetPageWidth(prevLineInParagraph.PageNum);
+            bool prevLineIsSubstantiallyFull = (prevLineInParagraph.ApproximateBoundingBox.GetRight() - prevLineInParagraph.ApproximateBoundingBox.GetLeft()) > (pageWidthApproximation * 0.70);
+
+            if (prevLineIsSubstantiallyFull)
+            {
+                if (currentLineX < firstLineX - xIndentTolerance * 2) return false;
+                return true;
+            }
+            else
+            {
+                if (!alignedWithFirst && !alignedWithPrev)
+                {
+                    if (prevLineInParagraph.Text.Length < pageWidthApproximation * 0.3f && currentLineToTest.Text.Length > prevLineInParagraph.Text.Length * 1.5)
+                    {
+                        if (!alignedWithFirst && !alignedWithPrev) return false;
+                    }
+                    else if (!alignedWithFirst && !alignedWithPrev)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        private float GetPageWidth(int pageNum) // 简化 GetPageWidth
+        {
+            var elementsOnPage = _elements.Where(e => e.PageNum == pageNum); // 使用成员变量 _elements
+            if (!elementsOnPage.Any()) return 600; // Default
+            try
+            {
+                float minX = elementsOnPage.Min(e => e.ApproximateBoundingBox.GetX());
+                float maxX = elementsOnPage.Max(e => e.ApproximateBoundingBox.GetX() + e.ApproximateBoundingBox.GetWidth());
+                return maxX - minX;
+            }
+            catch { return 600; } // 容错
+        }
+
+        private TextElement CombineParagraphLinesToSingleElement(List<TextElement> lines)
+        {
+            if (lines == null || !lines.Any()) return null;
+            // 如果段落只有一行（在行内拼接后），则不需要额外处理换行
+            if (lines.Count == 1) return lines[0];
+
+            TextElement firstLine = lines[0];
+            TextElement lastLine = lines.Last();
+
+            // --- 修改文本连接逻辑 ---
+            StringBuilder combinedTextBuilder = new StringBuilder();
+            for (int i = 0; i < lines.Count; i++)
+            {
+                // 获取当前行的文本，并去除可能由之前行内合并产生的首尾多余空格
+                string lineText = lines[i].Text.Trim();
+                combinedTextBuilder.Append(lineText);
+
+                // 如果不是段落的最后一行，则在行尾添加一个换行符
+                // 注意：这里我们假设视觉上的换行都应该变成一个换行符。
+                // 如果原始 PDF 中的换行是“软换行”（自动换行），而你想用空格代替，
+                // 那么这里的逻辑需要更复杂，可能需要分析行尾字符或与下一行的关系。
+                // 但根据你的需求“在中间加上换行”，这里直接加 Environment.NewLine。
+                if (i < lines.Count - 1)
+                {
+                    combinedTextBuilder.Append(Environment.NewLine); // 使用 Environment.NewLine 来获得平台相关的换行符
+                }
+            }
+            string combinedText = combinedTextBuilder.ToString();
+            // --- 文本连接逻辑结束 ---
+
+            // 计算段落的整体边界框 (与之前相同)
+            float minX = lines.Min(l => l.ApproximateBoundingBox.GetLeft());
+            float minY = lines.Min(l => l.ApproximateBoundingBox.GetBottom());
+            float maxX = lines.Max(l => l.ApproximateBoundingBox.GetRight());
+            float maxY = lines.Max(l => l.ApproximateBoundingBox.GetTop());
+            Rectangle combinedBBox = new Rectangle(minX, minY, maxX - minX, maxY - minY);
+
+            return new TextElement
+            {
+                PageNum = firstLine.PageNum, // 使用你的页码属性名
+                Text = combinedText,         // 使用包含换行符的合并文本
+                ApproximateBoundingBox = combinedBBox,
+                StartPoint = firstLine.StartPoint, // 段落的起点是第一行的起点
+                EndPoint = lastLine.EndPoint,     // 段落的终点是最后一行的终点
+                FontName = firstLine.FontName,    // 取第一行的样式作为代表
+                FontSize = firstLine.FontSize,
+                FontColor = firstLine.FontColor,
+                CharacterSpacing = firstLine.CharacterSpacing, // 这些可能需要取平均或更复杂的处理
+                WordSpacing = firstLine.WordSpacing,
+                HorizontalScaling = firstLine.HorizontalScaling,
+                OriginalFont = firstLine.OriginalFont,
+                ElementType = firstLine.ElementType, // 段落类型通常与首行一致，或默认为 TextNormal (你的是 PDFElementType)
+                NeedsTranslated = firstLine.NeedsTranslated // 使用你的 NeedsTranslated 属性
+            };
+        }
+
+        private bool AreColorsSimilar(Color c1, Color c2, float tolerance = 0.05f)
+        {
+            if (c1 == null && c2 == null) return true; if (c1 == null || c2 == null) return false;
+            var comp1 = c1.GetColorValue(); var comp2 = c2.GetColorValue();
+            if (comp1.Length != comp2.Length) return false;
+            for (int i = 0; i < comp1.Length; i++) { if (Math.Abs(comp1[i] - comp2[i]) > tolerance) return false; }
+            return true;
+        }
+
         public ICollection<EventType> GetSupportedEvents()
         {
-            // 需要监听文本、图像和路径事件
             return new List<EventType> { EventType.RENDER_TEXT, EventType.RENDER_IMAGE, EventType.RENDER_PATH };
         }
 
-        /// <summary>
-        /// 获取此监听器收集到的所有元素。
-        /// </summary>
-        public List<IPDFElement> GetExtractedElements()
+        public List<IPDFElement> GetExtractedElements() // 修改这里以执行两阶段合并
         {
-            return GetAndMergeExtractedElements();
+            var rawTextElements = _elements.OfType<TextElement>().ToList();
+            var otherElements = _elements.Where(e => !(e is TextElement)).ToList();
+
+            if (!rawTextElements.Any()) return otherElements;
+
+            // 阶段1: 行内拼接
+            List<TextElement> stitchedLines = StitchTextElementsInLines(rawTextElements);
+
+            // 阶段2: 段落构建
+            List<TextElement> paragraphs = BuildParagraphsFromLines(stitchedLines);
+
+            List<IPDFElement> finalElements = new List<IPDFElement>();
+            finalElements.AddRange(paragraphs); // 添加合并后的段落
+            finalElements.AddRange(otherElements); // 添加其他非文本元素
+
+            // 最终排序
+            finalElements = finalElements
+                .OrderBy(e => e.PageNum)
+                .ThenByDescending(e => e.ApproximateBoundingBox.GetY())
+                .ThenBy(e => e.ApproximateBoundingBox.GetX())
+                .ToList();
+
+            return finalElements;
+        }
+    }
+
+    // PointComparer (如果之前未在别处定义)
+    internal class PointComparer : IEqualityComparer<iText.Kernel.Geom.Point>
+    {
+        public bool Equals(iText.Kernel.Geom.Point p1, iText.Kernel.Geom.Point p2)
+        {
+            if (p1 == null && p2 == null) return true; if (p1 == null || p2 == null) return false;
+            double tolerance = 0.01;
+            return Math.Abs(p1.GetX() - p2.GetX()) < tolerance && Math.Abs(p1.GetY() - p2.GetY()) < tolerance;
+        }
+        public int GetHashCode(iText.Kernel.Geom.Point p)
+        {
+            if (p == null) return 0;
+            return p.GetX().GetHashCode() ^ p.GetY().GetHashCode();
         }
     }
 }
